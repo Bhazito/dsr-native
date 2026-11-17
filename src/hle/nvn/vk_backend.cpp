@@ -4148,6 +4148,12 @@ private:
                                        depth_peek->fragdepth_written && IsDepthFormat(depth_peek->nvn_format) &&
                                        HasDepth(depth_peek->nvn_format) && st_.depth.depth_test && !st_.depth.depth_write &&
                                        st_.program[1] && st_.depth.depth_func != 8 && !debug_fx;
+        if (dsr::GetRuntime().config.skip_shadows && !st_.program[1] && depth_peek && IsDepthFormat(depth_peek->nvn_format) &&
+        depth_peek->width == depth_peek->height && depth_peek->width >= 512) {
+        if (shadow_draws_skipped_++ == 0)
+        LOGI(kTag, "skip_shadows: shadow map draws skipped (first one into %dx%d)", depth_peek->width, depth_peek->height);
+        return;
+        }
         if (shader_depth_test) fopt.depth_test_func = st_.depth.depth_func;
         Shader* vs = GetShader(*st_.program[0], vopt);
         // No pixel program: a depth-only pass (shadow maps, depth prepass). Draw with the vertex stage only.
