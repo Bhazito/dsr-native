@@ -466,6 +466,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
             else if (!strcmp(key, "max_anisotropy")) cfg->max_anisotropy = v;
             else if (!strcmp(key, "shadow_compare")) cfg->shadow_compare = std::clamp(v, 0, 3);
             else if (!strcmp(key, "skip_shadows")) cfg->skip_shadows = v != 0;
+                else if (!strcmp(key, "skip_small_passes")) cfg->skip_small_passes = std::clamp(v, 0, 1000000);
             else if (!strcmp(key, "game_hooks")) cfg->game_hooks = v != 0;
             else if (!strcmp(key, "skip_intro")) cfg->skip_intro = v != 0;
             else if (!strcmp(key, "render_pass_objects")) cfg->render_pass_objects = v != 0;
@@ -608,6 +609,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
     if (!cfg->shadow_compare) cfg->shadow_compare = 3;
     LOGI(kTag, "settings: skip_shadows on (shadow map draws skipped, shadow_compare %d)", cfg->shadow_compare);
     }
+    if (cfg->skip_small_passes) LOGI(kTag, "settings: skip_small_passes %d pixels", cfg->skip_small_passes);
     if (!g_custom_game_dir.empty()) LOGI(kTag, "settings: game_dir %s", g_custom_game_dir.c_str());
     LOGI(kTag, "settings: touch controls %s, opacity %.2f, camera speed %.2f%s", g_touch.enabled ? "on" : "off",
          g_touch.opacity, g_touch.camera_speed, g_touch.camera_invert ? ", camera inverted" : "");
