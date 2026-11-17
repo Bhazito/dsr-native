@@ -6222,6 +6222,7 @@ private:
     std::unordered_map<uint64_t, VkDeviceSize> stream_cache_;
     uint64_t upload_hits_ = 0, upload_bytes_ = 0;
     uint64_t depth_gen_ = 0;
+    uint64_t shadow_draws_skipped_ = 0;
     // HUD box for other aspect ratios (see Draw): size, 0 = off.
     // Whether a draw on the final frame is one of the game's 2D HUD / menu draws to keep in a 16:9 box: its vertex
     // shader's c3 is the 2D projection for a 1280x720 layout (x * 2/1280 - 1, y * -2/720 + 1), and its vertices do
