@@ -604,6 +604,10 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
          int(cfg->bc_enabler), cfg->language.c_str(), cfg->render_scale, cfg->shadow_compare,
          int(cfg->game_hooks), int(cfg->skip_intro), int(cfg->render_pass_objects), int(cfg->mali_barriers), int(cfg->performance_mode), cfg->texture_mip_skip, cfg->present_mode.c_str(),
          cfg->hole_test);
+    if (cfg->skip_shadows) {
+    if (!cfg->shadow_compare) cfg->shadow_compare = 3;
+    LOGI(kTag, "settings: skip_shadows on (shadow map draws skipped, shadow_compare %d)", cfg->shadow_compare);
+    }
     if (!g_custom_game_dir.empty()) LOGI(kTag, "settings: game_dir %s", g_custom_game_dir.c_str());
     LOGI(kTag, "settings: touch controls %s, opacity %.2f, camera speed %.2f%s", g_touch.enabled ? "on" : "off",
          g_touch.opacity, g_touch.camera_speed, g_touch.camera_invert ? ", camera inverted" : "");
