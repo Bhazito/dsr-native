@@ -64,6 +64,7 @@ struct RuntimeConfig {
     // 1 = operands swapped; 2 = always 1 (shadowed); 3 = always 0 (lit)).
     int shadow_compare = 0;
     bool skip_shadows = false;
+    int skip_small_passes = 0;
     // game_hooks = 0: none of the engine patches (frame rate, resolution, log hooks) are installed.
     bool game_hooks = true;
     // render_pass_objects = 1: VkRenderPass / VkFramebuffer objects even when the driver has dynamic rendering
