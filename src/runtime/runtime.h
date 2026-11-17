@@ -63,6 +63,7 @@ struct RuntimeConfig {
     // Diagnostics. shadow_compare: how the shadow map lookups compare (0 = the game's function as Vulkan's;
     // 1 = operands swapped; 2 = always 1 (shadowed); 3 = always 0 (lit)).
     int shadow_compare = 0;
+    bool skip_shadows = false;
     // game_hooks = 0: none of the engine patches (frame rate, resolution, log hooks) are installed.
     bool game_hooks = true;
     // render_pass_objects = 1: VkRenderPass / VkFramebuffer objects even when the driver has dynamic rendering
