@@ -4207,15 +4207,25 @@ private:
         if (dsr::GetRuntime().config.hole_test & 512)
             while (!colors.empty() && !colors.back()) colors.pop_back();
         if (depth && !IsDepthFormat(depth->nvn_format)) depth = nullptr;
-        if (const int small_limit = dsr::GetRuntime().config.skip_small_passes; small_limit > 0 && st_.program[1]) {
-        const Image* c0 = colors.empty() ? nullptr : colors[0];
-        const int px = c0 ? c0->width * c0->height : 0;
-        if (c0 && px > 64 * 64 && px <= small_limit) {
-        if (small_draws_skipped_++ == 0)
-            LOGI(kTag, "skip_small_passes: small target draws skipped (first one into %dx%d)", c0->width, c0->height);
-        return;
-    }
-}
+        // Small colour targets (above 64x64, which the exposure readback needs, up to 320x180): each pixel shader used
+        // is logged once (to tell the bloom passes from the others); skip_small_passes drops those up to N pixels.
+        if (st_.program[1] && !colors.empty() && colors[0]) {
+            const Image* c0 = colors[0];
+            const int px = c0->width * c0->height;
+            if (px > 64 * 64 && px <= 57600) {
+                const uint64_t key = st_.program[1]->hash ^ (uint64_t(c0->width) << 48) ^ (uint64_t(c0->height) << 32);
+                if (small_seen_.insert(key).second)
+                    LOGI(kTag, "small target pass: %dx%d fmt %d, pixel shader %016llx", c0->width, c0->height,
+                         c0->nvn_format, (unsigned long long)st_.program[1]->hash);
+                const int small_limit = dsr::GetRuntime().config.skip_small_passes;
+                if (small_limit > 0 && px <= small_limit) {
+                    if (small_draws_skipped_++ == 0)
+                        LOGI(kTag, "skip_small_passes: small target draws skipped (first one into %dx%d)", c0->width,
+                             c0->height);
+                    return;
+                }
+            }
+        }
         Begin();
         // Keep enough streaming space for this draw so nothing allocated below is lost to a flush.
         if (StreamRemaining() < (16ull << 20)) Flush();
@@ -6232,6 +6242,7 @@ private:
     uint64_t depth_gen_ = 0;
     uint64_t shadow_draws_skipped_ = 0;
     uint64_t small_draws_skipped_ = 0;
+    std::unordered_set<uint64_t> small_seen_;  // small target passes already logged
     // HUD box for other aspect ratios (see Draw): size, 0 = off.
     // Whether a draw on the final frame is one of the game's 2D HUD / menu draws to keep in a 16:9 box: its vertex
     // shader's c3 is the 2D projection for a 1280x720 layout (x * 2/1280 - 1, y * -2/720 + 1), and its vertices do

@@ -430,8 +430,8 @@ public final class SettingsMenu {
     private void buildGraphicsTab() {
         section(Strings.t("sec_display"));
         choice("fps", Strings.t("fps_t"), Strings.t("fps_auto_n") + " " + Strings.t("changes_now"),
-                new String[] {"30", "45", "60", "auto"},
-                new String[] {"30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
+                new String[] {"20", "30", "45", "60", "auto"},
+                new String[] {"20 fps", "30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
         choice("present_mode", Strings.t("present_t"), Strings.t("changes_next"),
                 new String[] {"fifo", "mailbox"},
                 new String[] {Strings.t("present_vsync") + " " + Strings.t("default_mark"), Strings.t("present_mailbox")},
@@ -448,6 +448,8 @@ public final class SettingsMenu {
         toggle("performance_mode", Strings.t("perf_t"), Strings.t("perf_n") + " " + Strings.t("changes_next"), "1", "0",
                 "0");
         renderScale();  // performance mode sets 75%; it can be moved freely afterwards
+        toggle("skip_shadows", Strings.t("skipsh_t"), Strings.t("skipsh_n") + " " + Strings.t("changes_next"), "1", "0",
+                "0");
 
         section(Strings.t("sec_gpu"));
         note(Strings.t("gpu_n"));

@@ -389,7 +389,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
         if (FILE* w = fopen(path.c_str(), "w")) {
             fprintf(w,
                     "# DSR Native settings (read at start-up)\n"
-                    "# fps: frame rate cap, 30 (as on Switch) to 60; e.g. 45 for a steady rate in heavy areas; auto = the\n"
+                    "# fps: frame rate cap, 20 to 60 (30 as on Switch); e.g. 45 for a steady rate in heavy areas; auto = the\n"
                     "# cap follows what the device sustains (60, 30 or 20 fps; min_fps = 15 also allows 15)\n"
                     "fps = %d\n"
                     "# async_pipelines: 1 = compile new GPU pipelines in the background (no hitch; a new object may\n"
@@ -448,7 +448,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
             const int v = atoi(value);
             if (!strcmp(key, "fps")) {  // e.g. 45: a steady cap below 60; auto: dynamic (60 / 30 / 20)
                 cfg->dynamic_fps = !strcmp(value, "auto");
-                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 30, 60);
+                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 20, 60);
             } else if (!strcmp(key, "min_fps")) cfg->min_fps = std::clamp(v, 15, 30);
             else if (!strcmp(key, "async_pipelines")) cfg->async_pipelines = v != 0;
             else if (!strcmp(key, "auto_capture")) cfg->auto_capture = v != 0;
@@ -978,7 +978,7 @@ jboolean JNICALL MenuApply(JNIEnv* env, jclass, jstring jkey, jstring jvalue) {
     if (key == "fps") {
         if (dsr::FrameRateAdjustable()) {
             c.dynamic_fps = value == "auto";
-            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 30, 60);
+            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 20, 60);
             now = true;
         }
     } else if (key == "face_buttons") {

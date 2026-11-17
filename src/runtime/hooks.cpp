@@ -388,7 +388,7 @@ int GpuHasBc() { return g_gpu_has_bc.load(); }
 int FrameRateNow() {
     if (MoviePlaying()) return MovieFps();
     const RuntimeConfig& c = GetRuntime().config;
-    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 30, 60);
+    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 20, 60);
 }
 
 const char* GameVersion() { return g_build ? g_build->version : nullptr; }
@@ -453,7 +453,7 @@ void InstallGameHooks() {
                      "game time step follows the frame time", MinFps());
             else
                 LOGI("hooks", "frame rate: own frame limiter at %d fps (changeable in game), game time step follows the frame time",
-                     std::clamp(rt.config.target_fps, 30, 60));
+                     std::clamp(rt.config.target_fps, 20, 60));
         } else {
             LOGW("hooks", "60 fps patches failed (%s): staying at 30 fps", err.c_str());
             rt.main.PatchInstruction(b.step_adrp + 4, 0xBD400108, b.step_ldr_insn, &err);  // undo what applied
