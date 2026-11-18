@@ -238,6 +238,23 @@ final class Strings {
                 "Mali처럼 게임의 텍스처 형식이 없거나 타일 방식으로 그리는 GPU용입니다. 테스트할 때가 아니면 끄세요.",
                 "适用于 Mali 等缺少游戏纹理格式或以分块方式绘制的 GPU。除测试外请保持关闭。",
                 "適用於 Mali 等缺少遊戲紋理格式或以分塊方式繪製的 GPU。除測試外請保持關閉。");
+        put("tstyle_t", "Button style", "Style des boutons", "Tastenstil", "Stile dei pulsanti", "Estilo de botones",
+                "Estilo dos botões", "Стиль кнопок", "ボタンのスタイル", "버튼 스타일", "按键样式", "按鍵樣式");
+        put("tstyle_n", "Mobile: big attack button with actions around it, drawer (•••) for the rest. Swipe on ITEM to change slot.",
+                "Mobile : gros bouton d'attaque entouré des actions, tiroir (•••) pour le reste. Glissez sur ITEM pour changer d'emplacement.",
+                "Mobil: großer Angriffsknopf mit Aktionen darum, Schublade (•••) für den Rest. Auf ITEM wischen wechselt den Slot.",
+                "Mobile: grande pulsante d'attacco con le azioni intorno, cassetto (•••) per il resto. Scorri su ITEM per cambiare slot.",
+                "Móvil: botón de ataque grande con las acciones alrededor y un cajón (•••) para el resto. Desliza sobre ITEM para cambiar de ranura.",
+                "Móvel: botão de ataque grande com as ações ao redor e gaveta (•••) para o resto. Deslize em ITEM para trocar de slot.",
+                "Мобильный: большая кнопка атаки, вокруг действия, ящик (•••) для остального. Свайп по ITEM меняет слот.",
+                "モバイル：大きな攻撃ボタンの周りにアクション、残りは引き出し（•••）。ITEM をスワイプでスロット切替。",
+                "모바일: 큰 공격 버튼 주위에 동작, 나머지는 서랍(•••). ITEM을 스와이프하면 슬롯 변경.",
+                "手机式：大攻击键周围排列动作，其余在抽屉（•••）。在 ITEM 上滑动切换栏位。",
+                "手機式：大攻擊鍵周圍排列動作，其餘在抽屜（•••）。在 ITEM 上滑動切換欄位。");
+        put("tstyle_mobile", "Mobile", "Mobile", "Mobil", "Mobile", "Móvil", "Móvel", "Мобильный", "モバイル", "모바일",
+                "手机式", "手機式");
+        put("tstyle_classic", "Gamepad", "Manette", "Gamepad", "Gamepad", "Mando", "Controle", "Геймпад", "ゲームパッド",
+                "게임패드", "手柄式", "手把式");
         put("nodof_t", "No depth-of-field blur (faster)", "Sans flou de profondeur (plus rapide)",
                 "Keine Tiefenunschärfe (schneller)", "Senza sfocatura di profondità (più veloce)",
                 "Sin desenfoque de profundidad (más rápido)", "Sem desfoque de profundidade (mais rápido)",

@@ -4231,15 +4231,14 @@ private:
         if (const dsr::RuntimeConfig& pcfg = dsr::GetRuntime().config;
             (pcfg.no_dof || pcfg.no_bloom) && st_.program[1] && !colors.empty() && colors[0]) {
             const uint64_t h = st_.program[1]->hash;
-            const int w = colors[0]->width, rw = pcfg.render_width;
-            const bool downsample = h == 0x8801d1d8f9f8273bull;
+            const int w = colors[0]->width;
             bool drop = false;
             if (pcfg.no_dof)
                 drop = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull || h == 0xcdeb232ada05c0afull ||
-                       h == 0xf503d9c09783ac14ull || (downsample && w * 2 == rw);
+                       h == 0xf503d9c09783ac14ull;
             if (pcfg.no_bloom && !drop)
                 drop = h == 0xc3d56b6401ccb572ull || h == 0x512397bbc420f850ull || h == 0x9b44066e84ff04c6ull ||
-                       h == 0x82aa25701a19c22bull || (downsample && w * 8 == rw);
+                       h == 0x82aa25701a19c22bull;
             if (drop) {
                 if (postfx_dropped_++ == 0)
                     LOGI(kTag, "no_dof / no_bloom: effect passes skipped (first one into %dx%d)", w, colors[0]->height);

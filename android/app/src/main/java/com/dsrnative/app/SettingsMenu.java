@@ -95,6 +95,7 @@ public final class SettingsMenu {
         Map<String, String> v = readSettings();
         Strings.setLanguage(v.containsKey("language") ? v.get("language") : "en-US");
         TouchControls.sRecenter = !"0".equals(v.get("touch_camera_recenter"));
+        TouchControls.sMobile = !"classic".equals(v.get("touch_style"));
         TouchControls.setLayout(v.get("touch_layout"));
         if ("1".equals(v.get("fps_counter"))) FpsCounter.apply(activity, true);
         showFirstLaunchTip(activity);
@@ -721,6 +722,8 @@ public final class SettingsMenu {
     private void buildTouchTab() {
         section(Strings.t("sec_touch"));
         toggle("touch_controls", Strings.t("touch_t"), Strings.t("changes_now"), "1", "0", "1");
+        choice("touch_style", Strings.t("tstyle_t"), Strings.t("tstyle_n"), new String[] {"mobile", "classic"},
+                new String[] {Strings.t("tstyle_mobile"), Strings.t("tstyle_classic")}, "mobile");
         choice("touch_opacity", Strings.t("opacity_t"), null, new String[] {"0.3", "0.5", "0.7", "1.0"},
                 new String[] {"30%", "50%", "70%", "100%"}, "0.7");
         choice("touch_camera_speed", Strings.t("camspeed_t"), null, new String[] {"0.75", "1.0", "1.5", "2.0"},
@@ -1361,6 +1364,9 @@ public final class SettingsMenu {
             now = true;
         } else if (key.equals("touch_camera_recenter")) {
             TouchControls.sRecenter = !"0".equals(value);
+            now = true;
+        } else if (key.equals("touch_style")) {
+            TouchControls.setStyle(value);
             now = true;
         } else if (key.startsWith("touch_") && !key.equals("touch_camera_invert")) {
             boolean on = !"0".equals(mValues.get("touch_controls"));

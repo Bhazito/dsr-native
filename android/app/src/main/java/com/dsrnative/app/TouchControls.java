@@ -47,7 +47,21 @@ public final class TouchControls extends View implements InputManager.InputDevic
     /** Offsets of the groups from their default spots, in layout units (settings.txt touch_layout). */
     private static volatile Map<String, float[]> sLayout = new HashMap<>();
     /** Groups that can be moved, in settings.txt. */
-    static final String[] GROUPS = {"face", "dpad", "stick", "zl", "l", "zr", "r", "minus", "plus", "l3", "lock"};
+    static final String[] GROUPS = {"face", "dpad", "stick", "zl", "l", "zr", "r", "minus", "plus", "l3", "lock",
+            "roll", "item", "act", "more"};
+
+    /** settings.txt touch_style: "mobile" (default: big attack button, arc of actions, drawer) or "classic". */
+    static volatile boolean sMobile = true;
+
+    static void setStyle(String s) {
+        sMobile = !"classic".equals(s);
+        final TouchControls v = sView;
+        if (v != null) v.post(() -> {
+            v.releaseAll();
+            v.mMore = false;
+            v.relayout();
+        });
+    }
 
     /** Size factors a group can have (layout editor: pinch, or - / +). */
     static final float SIZE_MIN = 0.5f, SIZE_MAX = 2.0f, SIZE_STEP = 0.1f;
@@ -183,13 +197,16 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private boolean mShown = true;
 
-    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3;
+    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3, K_ITEM = 4;
+    private boolean mMore;  // mobile style: the drawer with the secondary buttons is open
+    private final float[] mStartX = new float[16], mStartY = new float[16];
+    private final boolean[] mSwiped = new boolean[16];
 
     private static final class Button {
         final String label;
         final int bit;
-        final boolean round;
-        final String group;  // moved together in the layout editor
+        boolean round;
+        String group;  // moved together in the layout editor
         float cx, cy, w, h;  // centre and size (px)
         int pressCount;
         Button(String label, int bit, boolean round, String group) {
@@ -291,6 +308,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
         mButtons.add(new Button("▶", RIGHT, false, "dpad"));
         mButtons.add(new Button("L3", L3, true, "l3"));
         mButtons.add(new Button("LOCK", R3, true, "lock"));
+        mButtons.add(new Button("\u2022\u2022\u2022", 0, true, "more"));
         for (int i = 0; i < 16; i++) mKind[i] = K_NONE;
         // A controller already connected (or built in, as on handhelds): start hidden.
         if (controllerConnected()) mShown = false;
@@ -428,11 +446,102 @@ public final class TouchControls extends View implements InputManager.InputDevic
         return p;
     }
 
+    private void setG(int bit, String g) {
+        find(bit).group = g;
+    }
+
+    /** Classic: the Switch groups and shapes; mobile: every action has its own group, the shoulders are round. */
+    private void setClassicShapes(boolean classic) {
+        setG(A, classic ? "face" : "act");
+        setG(B, classic ? "face" : "roll");
+        setG(X, classic ? "face" : "item");
+        setG(Y, "face");
+        find(L).round = find(R).round = find(ZR).round = !classic;
+    }
+
+    private void circ(int bit, String g, float x, float y, float size) {
+        float[] p = at(g, x, y);
+        float s = size * sz(g);
+        place(bit, p[0], p[1], s, s);
+    }
+
+    /**
+     * Mobile style (after Pascal's Wager): a big attack button under the right thumb with the other actions in an
+     * arc around it (heavy attack, block, roll, item with swipes for the d-pad, interact), lock-on above, and a
+     * ••• button at the top right that opens a drawer with the rarely used ones (two hands, left hand, run toggle,
+     * d-pad, menu, map).
+     */
+    private void layoutMobile(int w, int h, float u) {
+        circ(R, "r", w - 2.4f * u, h - 2.5f * u, 2.3f * u);       // attack
+        circ(B, "roll", w - 4.9f * u, h - 1.5f * u, 1.6f * u);    // roll / run (hold)
+        circ(L, "l", w - 5.2f * u, h - 3.7f * u, 1.5f * u);       // block
+        circ(X, "item", w - 4.1f * u, h - 5.7f * u, 1.5f * u);    // item: tap uses, swipe changes slot
+        circ(ZR, "zr", w - 1.6f * u, h - 5.1f * u, 1.5f * u);     // heavy attack
+        circ(A, "act", w - 7.0f * u, h - 2.0f * u, 1.3f * u);     // interact / pick up
+        circ(R3, "lock", w - 1.3f * u, h - 7.3f * u, 1.2f * u);   // lock on
+        circ(0, "more", w - 1.0f * u, 1.0f * u, 0.9f * u);
+        circ(Y, "face", w - 2.4f * u, 1.0f * u, 1.1f * u);
+        float[] p = at("zl", w - 4.3f * u, 1.0f * u);
+        place(ZL, p[0], p[1], 1.9f * u * sz("zl"), 1.0f * u * sz("zl"));
+        circ(L3, "l3", w - 6.0f * u, 1.0f * u, 1.0f * u);
+        circ(MINUS, "minus", w / 2f - 1.3f * u, 0.9f * u, 1.0f * u);
+        circ(PLUS, "plus", w / 2f + 1.3f * u, 0.9f * u, 1.0f * u);
+        p = at("dpad", w - 3.3f * u, 3.1f * u);
+        final float ds = 0.85f * u * sz("dpad"), db = 0.85f * u * sz("dpad");
+        place(UP, p[0], p[1] - ds, db, db);
+        place(DOWN, p[0], p[1] + ds, db, db);
+        place(LEFT, p[0] - ds, p[1], db, db);
+        place(RIGHT, p[0] + ds, p[1], db, db);
+    }
+
+    /** Mobile style hides the drawer's buttons until it is open (the editor shows everything). */
+    private boolean vis(Button b) {
+        if (b.bit == 0) return sMobile;
+        if (!sMobile || mEditing) return true;
+        switch (b.bit) {
+            case ZL: case Y: case L3: case PLUS: case MINUS: case UP: case DOWN: case LEFT: case RIGHT:
+                return mMore;
+            default:
+                return true;
+        }
+    }
+
+    private String labelOf(Button b) {
+        if (!sMobile) return b.label;
+        switch (b.bit) {
+            case R: return "ATK";
+            case ZR: return "HVY";
+            case L: return "BLK";
+            case B: return "ROLL";
+            case X: return "ITEM";
+            case A: return "USE";
+            case Y: return "2H";
+            case ZL: return "L-ATK";
+            default: return b.label;
+        }
+    }
+
+    private void pulse(final Button b) {
+        if (b == null) return;
+        b.pressCount++;
+        sendState();
+        invalidate();
+        mHandler.postDelayed(() -> {
+            if (b.pressCount > 0) b.pressCount--;
+            sendState();
+            invalidate();
+        }, 100);
+    }
+
     private void layout(int w, int h) {
         final float u = Math.min(w, h) / 10f;  // layout unit: a tenth of the short side
         mU = u;
         mW = w;
         mH = h;
+        float[] p;
+        setClassicShapes(!sMobile);
+        if (sMobile) layoutMobile(w, h, u);
+        else {
         // Face buttons, Switch layout (X top, A right, B bottom, Y left).
         float[] f = at("face", w - 3.0f * u, h - 3.0f * u);
         final float fs = sz("face"), fcx = f[0], fcy = f[1], d = 1.45f * u * fs, fb = 1.3f * u * fs;
@@ -440,7 +549,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
         place(B, fcx, fcy + d, fb, fb);
         place(X, fcx, fcy - d, fb, fb);
         place(Y, fcx - d, fcy, fb, fb);
-        float[] p = at("lock", w - 5.6f * u, h - 1.2f * u);
+        p = at("lock", w - 5.6f * u, h - 1.2f * u);
         place(R3, p[0], p[1], 1.3f * u * sz("lock"), 1.3f * u * sz("lock"));
         // Shoulders: ZL / ZR in the top corners, L / R below them.
         final float sw = 2.4f * u, sh = 1.1f * u;
@@ -466,6 +575,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
         place(RIGHT, dcx + ds, dcy, db, db);
         p = at("l3", 4.7f * u, h - 0.9f * u);
         place(L3, p[0], p[1], 1.0f * u * sz("l3"), 1.0f * u * sz("l3"));
+        }
         // Stick: resting spot, and the area where a finger grabs it.
         mStickRadius = 1.6f * u * sz("stick");
         mRRadius = 1.05f * u;
@@ -775,7 +885,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
         Button best = null;
         float bestDist = Float.MAX_VALUE;
         for (Button b : mButtons)
-            if (b.hit(x, y, slop)) {
+            if (vis(b) && b.hit(x, y, slop)) {
                 float dx = x - b.cx, dy = y - b.cy, dist = dx * dx + dy * dy;
                 if (dist < bestDist) {
                     bestDist = dist;
@@ -790,7 +900,17 @@ public final class TouchControls extends View implements InputManager.InputDevic
         mLastX[id] = x;
         mLastY[id] = y;
         Button b = hit(x, y);
-        if (b != null) {
+        if (b != null && b.bit == 0) {  // ••• : opens or closes the drawer
+            mKind[id] = K_NONE;
+            releaseAll();
+            mMore = !mMore;
+        } else if (b != null && sMobile && b.bit == X) {  // item: tap uses it, a swipe changes the slot
+            mKind[id] = K_ITEM;
+            mOn[id] = b;
+            mStartX[id] = x;
+            mStartY[id] = y;
+            mSwiped[id] = false;
+        } else if (b != null) {
             mKind[id] = K_BUTTON;
             mOn[id] = b;
             b.pressCount++;
@@ -830,6 +950,14 @@ public final class TouchControls extends View implements InputManager.InputDevic
                 }
                 break;
             }
+            case K_ITEM: {
+                float dx = x - mStartX[id], dy = y - mStartY[id];
+                if (!mSwiped[id] && Math.max(Math.abs(dx), Math.abs(dy)) > 0.7f * mU) {
+                    mSwiped[id] = true;
+                    pulse(find(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? RIGHT : LEFT) : (dy > 0 ? DOWN : UP)));
+                }
+                break;
+            }
             case K_STICK:
                 mStickX = x;
                 mStickY = y;
@@ -855,6 +983,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private void up(int id) {
         if (id < 0 || id >= 16) return;
         if (mKind[id] == K_BUTTON && mOn[id] != null) mOn[id].pressCount--;
+        if (mKind[id] == K_ITEM && !mSwiped[id]) pulse(find(X));
         if (mKind[id] == K_STICK) mStickPointer = -1;
         if (mKind[id] == K_RSTICK) mRStickPointer = -1;
         mKind[id] = K_NONE;
@@ -929,7 +1058,8 @@ public final class TouchControls extends View implements InputManager.InputDevic
         }
         // Buttons.
         for (Button b : mButtons) {
-            boolean on = b.pressCount > 0;
+            if (!vis(b)) continue;
+            boolean on = b.pressCount > 0 || (b.bit == 0 && mMore);
             mFill.setColor(mEditing && (b.group.equals(mDragGroup) || b.group.equals(mSelGroup)) ? 0xC0C9A55C
                     : on ? 0x90FFFFFF : 0x50000000);
             if (b.round) {
@@ -943,8 +1073,9 @@ public final class TouchControls extends View implements InputManager.InputDevic
             }
             mText.setColor(on ? 0xFF000000 : 0xFFFFFFFF);
             float size = mText.getTextSize();
-            if (b.label.length() > 2) mText.setTextSize(size * 0.7f);
-            c.drawText(b.label, b.cx, b.cy - (mText.descent() + mText.ascent()) / 2, mText);
+            final String lab = labelOf(b);
+            if (lab.length() > 2) mText.setTextSize(size * (lab.length() > 3 ? 0.62f : 0.7f));
+            c.drawText(lab, b.cx, b.cy - (mText.descent() + mText.ascent()) / 2, mText);
             mText.setTextSize(size);
         }
         if (mEditing) drawEditor(c);
