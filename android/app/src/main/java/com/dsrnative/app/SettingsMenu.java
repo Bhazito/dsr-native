@@ -607,8 +607,8 @@ public final class SettingsMenu {
 
     // ---- render scale -------------------------------------------------------------------------------------------
 
-    private static final float SCALE_MIN = 0.5f, SCALE_STEP = 0.05f;
-    private static final int SCALE_STEPS = 10;  // 0.5 .. 1.0
+    private static final float SCALE_MIN = 0.3f, SCALE_STEP = 0.05f;
+    private static final int SCALE_STEPS = 14;  // 0.3 .. 1.0
 
     /** The screen's long side / short side (what "Fill screen" uses). */
     private float screenAspect() {
@@ -633,8 +633,8 @@ public final class SettingsMenu {
             } catch (NumberFormatException ignored) {
             }
         }
-        float s = Math.max(0.5f, Math.min(1.0f, scale));
-        int h = Math.max(360, Math.min(720, Math.round(720f * s / 8f) * 8));
+        float s = Math.max(0.3f, Math.min(1.0f, scale));
+        int h = Math.max(216, Math.min(720, Math.round(720f * s / 8f) * 8));
         int w = Math.max(320, Math.min(1920, Math.round(h * aspect / 8f) * 8));
         if (Math.abs(aspect - 16f / 9f) < 0.01f && h == 720) w = 1280;
         return new int[] {w, h};

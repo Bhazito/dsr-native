@@ -4234,6 +4234,17 @@ private:
         // ---- textures (uploads and layout changes happen outside rendering) ---------------------------------
         std::vector<TexWrite>& tex_writes = scratch_tex_writes_;  // members: no allocation per draw
         tex_writes.clear();
+        // Diagnostics for finding the post-processing passes (bloom, blur, ...): each fullscreen-style draw (6 vertices or
+        // fewer) is logged once per pixel shader and target size, with its inputs.
+        const bool postfx_log = p.count <= 6 && st_.program[1] && !colors.empty() && colors[0] && postfx_logged_ < 400 &&
+                                postfx_seen_.insert(st_.program[1]->hash ^ (uint64_t(colors[0]->width) << 48) ^
+                                                    (uint64_t(colors[0]->height) << 32)).second;
+        if (postfx_log) {
+            postfx_logged_++;
+            LOGI(kTag, "postfx pass: target %dx%d fmt %d, pixel shader %016llx (%u instructions, %d textures)",
+                 colors[0]->width, colors[0]->height, colors[0]->nvn_format, (unsigned long long)st_.program[1]->hash,
+                 fs->info.instruction_count, __builtin_popcount(fs->info.texture_mask));
+        }
         for (int stage = 0; stage < 2; stage++) {
             const shader::ShaderInfo& info = stage == 0 ? vs->info : fs->info;
             for (uint32_t slot = 0; slot < 32; slot++) {
@@ -4279,6 +4290,9 @@ private:
                     img = DepthSnapshot(*depth, st_.rts[size_t(st_.num_rt)]);
                     if (!img) return Skip("texture is also the depth target");
                 }
+                if (postfx_log && stage == 1)
+                    LOGI(kTag, "postfx pass: pixel shader %016llx reads fs%u: %dx%d fmt %d",
+                         (unsigned long long)st_.program[1]->hash, slot, img->width, img->height, img->nvn_format);
                 if (stage == 0 && img->frag_only_sync && img->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
                     !img->clear_pending) {  // mali_barriers: released to fragment shaders only
                     EndRendering();
@@ -6243,6 +6257,8 @@ private:
     uint64_t shadow_draws_skipped_ = 0;
     uint64_t small_draws_skipped_ = 0;
     std::unordered_set<uint64_t> small_seen_;  // small target passes already logged
+    std::unordered_set<uint64_t> postfx_seen_;  // fullscreen-style passes already logged
+    int postfx_logged_ = 0;
     // HUD box for other aspect ratios (see Draw): size, 0 = off.
     // Whether a draw on the final frame is one of the game's 2D HUD / menu draws to keep in a 16:9 box: its vertex
     // shader's c3 is the 2D projection for a 1280x720 layout (x * 2/1280 - 1, y * -2/720 + 1), and its vertices do

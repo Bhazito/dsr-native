@@ -470,7 +470,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
             else if (!strcmp(key, "game_hooks")) cfg->game_hooks = v != 0;
             else if (!strcmp(key, "skip_intro")) cfg->skip_intro = v != 0;
             else if (!strcmp(key, "render_pass_objects")) cfg->render_pass_objects = v != 0;
-            else if (!strcmp(key, "render_scale")) cfg->render_scale = std::clamp(float(atof(value)), 0.5f, 1.0f);
+            else if (!strcmp(key, "render_scale")) cfg->render_scale = std::clamp(float(atof(value)), 0.3f, 1.0f);
             else if (!strcmp(key, "language")) {
                 // The game's languages (nn::settings codes it recognises); the settings menu lists the same.
                 static const char* const kLanguages[] = {"en-US", "fr", "de", "it", "es", "pt", "ru", "ja", "ko",

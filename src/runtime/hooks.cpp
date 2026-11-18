@@ -475,7 +475,7 @@ void InstallGameHooks() {
     // game's half- and quarter-size buffers (640x360, 320x180) keep their 720-line sizes whatever the render
     // resolution, and a 4:3 test at 1280x960 died silently on loading a save. Only the width changes: wider
     // than 16:9 shows more at the sides, narrower (4:3: 960x720) less.
-    // Render scale (settings render_scale, 0.5 - 1.0): the same resolution settings at a lower size, height and
+    // Render scale (settings render_scale, 0.3 - 1.0; below 0.5 is experimental): the same resolution settings at a lower size, height and
     // width together (the height also has a getter with its own default, main+0x6a193c: main+0x6a1968 mov w2, #720).
     // The game draws less and the frame is enlarged to the screen at the end. Heights stay at or below 720 (the
     // fixed half- and quarter-size buffers are then larger than needed, which is harmless).
@@ -495,8 +495,8 @@ void InstallGameHooks() {
             ar = 16.0f / 9.0f;
             ar_ok = false;
         }
-        const float scale = std::clamp(rt.config.render_scale, 0.5f, 1.0f);
-        const int height = std::clamp(int(std::lround(720.0f * scale / 8.0f)) * 8, 360, 720);
+        const float scale = std::clamp(rt.config.render_scale, 0.3f, 1.0f);
+        const int height = std::clamp(int(std::lround(720.0f * scale / 8.0f)) * 8, 216, 720);
         const int width = std::clamp(int(std::lround(float(height) * ar / 8.0f)) * 8, 320, 1920);
         if (width != 1280 || height != 720) {
             std::string err;
