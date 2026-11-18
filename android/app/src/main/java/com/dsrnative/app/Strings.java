@@ -238,6 +238,36 @@ final class Strings {
                 "Mali처럼 게임의 텍스처 형식이 없거나 타일 방식으로 그리는 GPU용입니다. 테스트할 때가 아니면 끄세요.",
                 "适用于 Mali 等缺少游戏纹理格式或以分块方式绘制的 GPU。除测试外请保持关闭。",
                 "適用於 Mali 等缺少遊戲紋理格式或以分塊方式繪製的 GPU。除測試外請保持關閉。");
+        put("nodof_t", "No depth-of-field blur (faster)", "Sans flou de profondeur (plus rapide)",
+                "Keine Tiefenunschärfe (schneller)", "Senza sfocatura di profondità (più veloce)",
+                "Sin desenfoque de profundidad (más rápido)", "Sem desfoque de profundidade (mais rápido)",
+                "Без размытия по глубине (быстрее)", "被写界深度ぼかしなし（高速）", "피사계 심도 흐림 없음 (더 빠름)",
+                "无景深模糊（更快）", "無景深模糊（更快）");
+        put("nodof_n", "Skips the distance blur passes. Experimental: leave off if the picture breaks.",
+                "Ignore les passes de flou de distance. Expérimental : laissez désactivé si l'image se dégrade.",
+                "Überspringt die Entfernungsunschärfe. Experimentell: ausgeschaltet lassen, wenn das Bild kaputtgeht.",
+                "Salta i passaggi della sfocatura in lontananza. Sperimentale: lascia spento se l'immagine si rovina.",
+                "Omite las pasadas del desenfoque a distancia. Experimental: déjalo apagado si la imagen se rompe.",
+                "Pula as passagens do desfoque à distância. Experimental: deixe desligado se a imagem quebrar.",
+                "Пропускает проходы размытия вдали. Эксперимент: оставьте выключенным, если картинка ломается.",
+                "遠景ぼかしの描画を省略します。実験的：画面が崩れる場合はオフのままにしてください。",
+                "원거리 흐림 패스를 건너뜁니다. 실험적: 화면이 깨지면 꺼 두세요.",
+                "跳过远景模糊绘制。实验性：画面异常时请保持关闭。",
+                "跳過遠景模糊繪製。實驗性：畫面異常時請保持關閉。");
+        put("nobloom_t", "No bloom (faster)", "Sans bloom (plus rapide)", "Kein Bloom (schneller)",
+                "Senza bloom (più veloce)", "Sin bloom (más rápido)", "Sem bloom (mais rápido)",
+                "Без блума (быстрее)", "ブルームなし（高速）", "블룸 없음 (더 빠름)", "无泛光（更快）", "無泛光（更快）");
+        put("nobloom_n", "Skips the glow passes. Experimental: leave off if the picture breaks.",
+                "Ignore les passes de lueur. Expérimental : laissez désactivé si l'image se dégrade.",
+                "Überspringt die Leuchtpässe. Experimentell: ausgeschaltet lassen, wenn das Bild kaputtgeht.",
+                "Salta i passaggi del bagliore. Sperimentale: lascia spento se l'immagine si rovina.",
+                "Omite las pasadas del resplandor. Experimental: déjalo apagado si la imagen se rompe.",
+                "Pula as passagens do brilho. Experimental: deixe desligado se a imagem quebrar.",
+                "Пропускает проходы свечения. Эксперимент: оставьте выключенным, если картинка ломается.",
+                "光のにじみの描画を省略します。実験的：画面が崩れる場合はオフのままにしてください。",
+                "빛 번짐 패스를 건너뜁니다. 실험적: 화면이 깨지면 꺼 두세요.",
+                "跳过光晕绘制。实验性：画面异常时请保持关闭。",
+                "跳過光暈繪製。實驗性：畫面異常時請保持關閉。");
         put("skipsh_t", "No shadows (faster)", "Sans ombres (plus rapide)", "Keine Schatten (schneller)",
                 "Senza ombre (più veloce)", "Sin sombras (más rápido)", "Sem sombras (mais rápido)",
                 "Без теней (быстрее)", "影なし（高速）", "그림자 없음 (더 빠름)", "无阴影（更快）", "無陰影（更快）");

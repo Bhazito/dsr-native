@@ -65,6 +65,9 @@ struct RuntimeConfig {
     int shadow_compare = 0;
     bool skip_shadows = false;
     int skip_small_passes = 0;
+    // no_dof / no_bloom = 1: the depth-of-field (blur by distance) and bloom (glow) passes are not drawn (found by pixel
+    // shader hash with the "postfx pass" log); their results stay cleared.
+    bool no_dof = false, no_bloom = false;
     // game_hooks = 0: none of the engine patches (frame rate, resolution, log hooks) are installed.
     bool game_hooks = true;
     // render_pass_objects = 1: VkRenderPass / VkFramebuffer objects even when the driver has dynamic rendering

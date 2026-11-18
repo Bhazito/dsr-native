@@ -448,6 +448,9 @@ public final class SettingsMenu {
         toggle("performance_mode", Strings.t("perf_t"), Strings.t("perf_n") + " " + Strings.t("changes_next"), "1", "0",
                 "0");
         renderScale();  // performance mode sets 75%; it can be moved freely afterwards
+        toggle("no_dof", Strings.t("nodof_t"), Strings.t("nodof_n") + " " + Strings.t("changes_next"), "1", "0", "0");
+        toggle("no_bloom", Strings.t("nobloom_t"), Strings.t("nobloom_n") + " " + Strings.t("changes_next"), "1", "0",
+                "0");
         toggle("skip_shadows", Strings.t("skipsh_t"), Strings.t("skipsh_n") + " " + Strings.t("changes_next"), "1", "0",
                 "0");
 

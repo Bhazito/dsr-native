@@ -4226,6 +4226,26 @@ private:
                 }
             }
         }
+        // no_dof / no_bloom: the depth-of-field and bloom passes (pixel shader hashes from the "postfx pass" log, the
+        // downsamples by target size: half and eighth of the render size) are dropped.
+        if (const dsr::RuntimeConfig& pcfg = dsr::GetRuntime().config;
+            (pcfg.no_dof || pcfg.no_bloom) && st_.program[1] && !colors.empty() && colors[0]) {
+            const uint64_t h = st_.program[1]->hash;
+            const int w = colors[0]->width, rw = pcfg.render_width;
+            const bool downsample = h == 0x8801d1d8f9f8273bull;
+            bool drop = false;
+            if (pcfg.no_dof)
+                drop = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull || h == 0xcdeb232ada05c0afull ||
+                       h == 0xf503d9c09783ac14ull || (downsample && w * 2 == rw);
+            if (pcfg.no_bloom && !drop)
+                drop = h == 0xc3d56b6401ccb572ull || h == 0x512397bbc420f850ull || h == 0x9b44066e84ff04c6ull ||
+                       h == 0x82aa25701a19c22bull || (downsample && w * 8 == rw);
+            if (drop) {
+                if (postfx_dropped_++ == 0)
+                    LOGI(kTag, "no_dof / no_bloom: effect passes skipped (first one into %dx%d)", w, colors[0]->height);
+                return;
+            }
+        }
         Begin();
         // Keep enough streaming space for this draw so nothing allocated below is lost to a flush.
         if (StreamRemaining() < (16ull << 20)) Flush();
@@ -6259,6 +6279,7 @@ private:
     std::unordered_set<uint64_t> small_seen_;  // small target passes already logged
     std::unordered_set<uint64_t> postfx_seen_;  // fullscreen-style passes already logged
     int postfx_logged_ = 0;
+    uint64_t postfx_dropped_ = 0;  // settings no_dof / no_bloom
     // HUD box for other aspect ratios (see Draw): size, 0 = off.
     // Whether a draw on the final frame is one of the game's 2D HUD / menu draws to keep in a 16:9 box: its vertex
     // shader's c3 is the 2D projection for a 1280x720 layout (x * 2/1280 - 1, y * -2/720 + 1), and its vertices do
