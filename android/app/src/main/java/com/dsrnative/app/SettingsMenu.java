@@ -578,6 +578,22 @@ public final class SettingsMenu {
         toggle("face_buttons", Strings.t("swap_t"), Strings.t("swap_n") + " " + Strings.t("changes_now"),
                 "position", "label", "label");
 
+        if (mA instanceof GameActivity) {
+            section(Strings.t("sec_app"));
+            note(Strings.t("restart_n"));
+            TextView rs = chip(Strings.t("restart_t"), false);
+            rs.setGravity(Gravity.CENTER);
+            rs.setOnClickListener(v -> new AlertDialog.Builder(mA)
+                    .setMessage(Strings.t("restart_ask"))
+                    .setPositiveButton(Strings.t("restart_btn"), (dlg, w) -> ((GameActivity) mA).restartApp())
+                    .setNegativeButton(Strings.t("cancel"), null)
+                    .show());
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            rlp.topMargin = dp(8);
+            mBody.addView(rs, rlp);
+        }
+
         section(Strings.t("sec_folder"));
         String custom = mValues.containsKey("game_dir") ? mValues.get("game_dir") : "";
         note(Strings.t("folder_inuse", sGameDir));

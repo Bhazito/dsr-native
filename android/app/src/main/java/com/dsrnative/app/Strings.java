@@ -457,6 +457,35 @@ final class Strings {
                 "オン：ボタンは Switch と同じく位置で動作します（右のボタンで決定）。",
                 "켜기: 버튼이 Switch처럼 위치에 따라 동작합니다(오른쪽 버튼이 확인).", "开：按键按位置生效，与 Switch 相同（右侧按键为确认）。",
                 "開：按鍵依位置作用，與 Switch 相同（右側按鍵為確認）。");
+        put("sec_app", "Application", "Application", "Anwendung", "Applicazione", "Aplicación", "Aplicativo",
+                "Приложение", "アプリ", "앱", "应用", "應用程式");
+        put("restart_t", "Restart the game", "Redémarrer le jeu", "Spiel neu starten", "Riavvia il gioco",
+                "Reiniciar el juego", "Reiniciar o jogo", "Перезапустить игру", "ゲームを再起動", "게임 다시 시작",
+                "重启游戏", "重新啟動遊戲");
+        put("restart_n", "Closes the game and opens it again by itself (useful if it froze). Progress since the last save is lost.",
+                "Ferme le jeu et le relance automatiquement (utile s'il est figé). La progression depuis la dernière sauvegarde est perdue.",
+                "Beendet das Spiel und startet es automatisch neu (nützlich bei Hängern). Fortschritt seit dem letzten Speichern geht verloren.",
+                "Chiude il gioco e lo riapre da solo (utile se si è bloccato). I progressi dall'ultimo salvataggio vanno persi.",
+                "Cierra el juego y lo vuelve a abrir solo (útil si se congeló). Se pierde el progreso desde el último guardado.",
+                "Fecha o jogo e abre de novo sozinho (útil se travou). O progresso desde o último salvamento é perdido.",
+                "Закрывает игру и сам открывает её снова (полезно при зависании). Прогресс с последнего сохранения будет потерян.",
+                "ゲームを終了して自動的に開き直します（フリーズ時に便利）。最後のセーブ以降の進行は失われます。",
+                "게임을 종료하고 자동으로 다시 엽니다(멈췄을 때 유용). 마지막 저장 이후의 진행 상황은 사라집니다.",
+                "关闭游戏并自动重新打开（卡死时很有用）。上次存档之后的进度将丢失。",
+                "關閉遊戲並自動重新開啟（當機時很有用）。上次存檔之後的進度將遺失。");
+        put("restart_ask", "Restart now? Progress since the last save is lost.",
+                "Redémarrer maintenant ? La progression depuis la dernière sauvegarde est perdue.",
+                "Jetzt neu starten? Fortschritt seit dem letzten Speichern geht verloren.",
+                "Riavviare ora? I progressi dall'ultimo salvataggio vanno persi.",
+                "¿Reiniciar ahora? Se pierde el progreso desde el último guardado.",
+                "Reiniciar agora? O progresso desde o último salvamento é perdido.",
+                "Перезапустить сейчас? Прогресс с последнего сохранения будет потерян.",
+                "今すぐ再起動しますか？最後のセーブ以降の進行は失われます。",
+                "지금 다시 시작할까요? 마지막 저장 이후의 진행 상황은 사라집니다.",
+                "现在重启吗？上次存档之后的进度将丢失。",
+                "現在重新啟動嗎？上次存檔之後的進度將遺失。");
+        put("restart_btn", "Restart", "Redémarrer", "Neu starten", "Riavvia", "Reiniciar", "Reiniciar", "Перезапуск",
+                "再起動", "다시 시작", "重启", "重新啟動");
         put("sec_folder", "Game folder", "Dossier du jeu", "Spielordner", "Cartella del gioco", "Carpeta del juego",
                 "Pasta do jogo", "Папка игры", "ゲームフォルダー", "게임 폴더", "游戏文件夹", "遊戲資料夾");
         put("folder_inuse", "Game files in use: %s", "Fichiers du jeu utilisés : %s", "Verwendete Spieldateien: %s",

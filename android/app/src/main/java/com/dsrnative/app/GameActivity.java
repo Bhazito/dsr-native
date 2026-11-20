@@ -96,6 +96,22 @@ public class GameActivity extends NativeActivity {
     private File mMenuDest;
 
     /** Settings menu: install the game, or an update over it, from .nsp / .xci files into the game folder. */
+    /**
+     * Relaunches the whole app (new process, so the native runtime and the GPU driver start clean). RestartActivity
+     * lives in its own process: it starts GameActivity again and kills this process, which also works while the
+     * native threads are stuck waiting for a hung GPU.
+     */
+    void restartApp() {
+        try {
+            Intent i = new Intent(this, RestartActivity.class);
+            i.putExtra(RestartActivity.EXTRA_PID, android.os.Process.myPid());
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            startActivity(i);
+        } catch (Exception e) {
+            android.util.Log.e("DSR/android", "restart failed", e);
+        }
+    }
+
     void installFromMenu(String gameDir) {
         mMenuDest = new File(gameDir);
         pickPackages();
