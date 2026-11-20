@@ -1562,6 +1562,7 @@ private:
         vkCreateSemaphore(device_, &sci, nullptr, &acquire_sem_);
         vkCreateSemaphore(device_, &sci, nullptr, &render_sem_);
         LoadPipelineCache();
+        LoadEtcCacheAsync();  // background: the converted textures of earlier runs
         init_failed_ = false;
         LOGI(kTag, "device ready (queue family %u)", family_);
         return true;
@@ -2381,6 +2382,95 @@ private:
     std::unordered_map<uint64_t, std::vector<uint8_t>> etc_cache_;
     size_t etc_cache_bytes_ = 0;
     static constexpr size_t kEtcCacheLimit = 96u << 20;
+    // The ETC2 results also live on disk (cache/etc2_textures.bin), so a scene the game has loaded before does not
+    // re-encode its textures on the render thread (a new area took seconds that way, and the game seemed frozen).
+    // The file is read by a background thread right after the device is created, and new entries are appended by
+    // another one; the render thread only takes `etc_mu_` for the lookups and inserts.
+    std::mutex etc_mu_;
+    std::vector<uint64_t> etc_new_keys_;  // entries not yet written to disk
+    std::atomic<bool> etc_dirty_{false}, etc_saving_{false};
+    std::chrono::steady_clock::time_point etc_last_save_{};
+    static constexpr uint32_t kEtcFileMagic = 0x31435445u;       // "ETC1"
+    static constexpr size_t kEtcFileLimit = 256u << 20;           // the file stops growing here
+
+    std::string EtcCachePath() const {
+        const std::string& dir = dsr::GetRuntime().config.cache_dir;
+        return dir.empty() ? std::string() : dir + "/etc2_textures.bin";
+    }
+    void LoadEtcCacheAsync() {
+        const std::string path = EtcCachePath();
+        if (path.empty()) return;
+        std::thread([this, path] {
+            FILE* f = fopen(path.c_str(), "rb");
+            if (!f) return;
+            uint32_t magic = 0;
+            size_t loaded = 0, bytes = 0;
+            if (fread(&magic, 4, 1, f) == 1 && magic == kEtcFileMagic) {
+                for (;;) {
+                    uint64_t key = 0;
+                    uint32_t n = 0;
+                    if (fread(&key, 8, 1, f) != 1 || fread(&n, 4, 1, f) != 1 || n == 0 || n > (64u << 20)) break;
+                    std::vector<uint8_t> data(n);
+                    if (fread(data.data(), 1, n, f) != n) break;
+                    std::lock_guard<std::mutex> lock(etc_mu_);
+                    if (etc_cache_bytes_ + n > kEtcCacheLimit) break;
+                    if (etc_cache_.emplace(key, std::move(data)).second) {
+                        etc_cache_bytes_ += n;
+                        loaded++;
+                        bytes += n;
+                    }
+                }
+            }
+            fclose(f);
+            LOGI(kTag, "ETC2 texture cache: %zu entries (%.1f MB) loaded from %s", loaded, bytes / 1048576.0,
+                 path.c_str());
+        }).detach();
+    }
+    // Appends the entries added since the last save (called from the stats line, at most every 20 s).
+    void SaveEtcCacheAsync() {
+        if (!etc_dirty_.load() || etc_saving_.exchange(true)) return;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - etc_last_save_ < std::chrono::seconds(20)) {
+            etc_saving_ = false;
+            return;
+        }
+        etc_last_save_ = now;
+        const std::string path = EtcCachePath();
+        if (path.empty()) {
+            etc_saving_ = false;
+            return;
+        }
+        std::thread([this, path] {
+            std::vector<std::pair<uint64_t, std::vector<uint8_t>>> batch;
+            {
+                std::lock_guard<std::mutex> lock(etc_mu_);
+                for (uint64_t k : etc_new_keys_) {
+                    auto it = etc_cache_.find(k);
+                    if (it != etc_cache_.end()) batch.emplace_back(k, it->second);
+                }
+                etc_new_keys_.clear();
+                etc_dirty_ = false;
+            }
+            if (!batch.empty()) {
+                FILE* f = fopen(path.c_str(), "ab");
+                if (f) {
+                    fseek(f, 0, SEEK_END);
+                    long size = ftell(f);
+                    bool ok = true;
+                    if (size == 0) ok = fwrite(&kEtcFileMagic, 4, 1, f) == 1;
+                    else if (size < 0 || size_t(size) > kEtcFileLimit) ok = false;
+                    for (auto& e : batch) {
+                        if (!ok) break;
+                        const uint32_t n = uint32_t(e.second.size());
+                        ok = fwrite(&e.first, 8, 1, f) == 1 && fwrite(&n, 4, 1, f) == 1 &&
+                             fwrite(e.second.data(), 1, n, f) == n;
+                    }
+                    fclose(f);
+                }
+            }
+            etc_saving_ = false;
+        }).detach();
+    }
     double bc_convert_ms_ = 0;     // conversion time, for the stats line
     uint64_t bc_cache_hits_ = 0, bc_converted_levels_ = 0;
 
@@ -2424,13 +2514,20 @@ private:
         for (const BcJob& j : bc_jobs_) {
             bc_converted_levels_++;
             if (!j.key) continue;
+            std::lock_guard<std::mutex> lock(etc_mu_);
             if (etc_cache_bytes_ + j.out_bytes > kEtcCacheLimit) {
                 etc_cache_.clear();
                 etc_cache_bytes_ = 0;
+                etc_new_keys_.clear();  // the rest is on disk already, or goes there with the next conversions
             }
             auto& e = etc_cache_[j.key];
+            const bool fresh = e.empty();
             etc_cache_bytes_ += j.out_bytes - e.size();
             e.assign(j.out, j.out + j.out_bytes);
+            if (fresh) {
+                etc_new_keys_.push_back(j.key);
+                etc_dirty_ = true;
+            }
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         bc_convert_ms_ += ms;
@@ -2508,6 +2605,7 @@ private:
                     if (img.bc_to != BcTo::Decoded) {
                         job.key = HashStep(Fnv(blocks, n), uint64_t(img.nvn_format) << 48 ^ uint64_t(w) << 24 ^
                                                                uint64_t(h) ^ uint64_t(l.depth) << 40) | 1;
+                        std::lock_guard<std::mutex> lock(etc_mu_);
                         auto hit = etc_cache_.find(job.key);
                         if (hit != etc_cache_.end() && hit->second.size() == out_bytes) {
                             memcpy(job.out, hit->second.data(), out_bytes);
@@ -6040,6 +6138,7 @@ private:
         pipeline_waits_ = 0;
         desc_reused_ = 0;
         if (new_pipelines_) SavePipelineCache();
+        SaveEtcCacheAsync();
         new_pipelines_ = 0;
         compile_ms_ = 0;
         fast_draws_ = 0;

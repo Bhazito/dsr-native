@@ -37,6 +37,12 @@ public final class TouchControls extends View implements InputManager.InputDevic
     static final int A = 1, B = 1 << 1, X = 1 << 2, Y = 1 << 3, L3 = 1 << 4, R3 = 1 << 5, L = 1 << 6, R = 1 << 7,
             ZL = 1 << 8, ZR = 1 << 9, PLUS = 1 << 10, MINUS = 1 << 11, LEFT = 1 << 12, UP = 1 << 13, RIGHT = 1 << 14,
             DOWN = 1 << 15;
+    /** Not a Switch button: the on-screen button that opens the Port's settings menu. */
+    static final int SETTINGS = 1 << 30;
+    /** Mobile style: hold the heavy attack this long to grab the weapon with two hands. */
+    static final long HEAVY_HOLD_MS = 1000;
+    /** Mobile style: a guard/parry touch held this long is a block (shorter: a parry). */
+    static final long GUARD_HOLD_MS = 180;
 
     static native void nativeState(int buttons, float lx, float ly, float rx, float ry);
     static native void nativeVisible(boolean visible);
@@ -48,7 +54,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private static volatile Map<String, float[]> sLayout = new HashMap<>();
     /** Groups that can be moved, in settings.txt. */
     static final String[] GROUPS = {"face", "dpad", "stick", "zl", "l", "zr", "r", "minus", "plus", "l3", "lock",
-            "roll", "item", "act", "more"};
+            "roll", "item", "act", "more", "cfg"};
 
     /** settings.txt touch_style: "mobile" (default: big attack button, arc of actions, drawer) or "classic". */
     static volatile boolean sMobile = true;
@@ -197,10 +203,17 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private boolean mShown = true;
 
-    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3, K_ITEM = 4;
+    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3, K_ITEM = 4, K_GUARD = 5;
     private boolean mMore;  // mobile style: the drawer with the secondary buttons is open
     private final float[] mStartX = new float[16], mStartY = new float[16];
     private final boolean[] mSwiped = new boolean[16];
+    // Holds: per finger, a timer that fires after a long press (heavy attack -> two hands, guard/parry -> block).
+    private final Runnable[] mHoldRun = new Runnable[16];
+    private final Button[] mHoldBtn = new Button[16];
+    private final long[] mDownMs = new long[16];
+    private final boolean[] mGuarding = new boolean[16];
+    private final Paint mIcon = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Path mPath = new android.graphics.Path();
 
     private static final class Button {
         final String label;
@@ -309,6 +322,10 @@ public final class TouchControls extends View implements InputManager.InputDevic
         mButtons.add(new Button("L3", L3, true, "l3"));
         mButtons.add(new Button("LOCK", R3, true, "lock"));
         mButtons.add(new Button("\u2022\u2022\u2022", 0, true, "more"));
+        mButtons.add(new Button("CFG", SETTINGS, true, "cfg"));
+        mIcon.setStyle(Paint.Style.STROKE);
+        mIcon.setStrokeCap(Paint.Cap.ROUND);
+        mIcon.setStrokeJoin(Paint.Join.ROUND);
         for (int i = 0; i < 16; i++) mKind[i] = K_NONE;
         // A controller already connected (or built in, as on handhelds): start hidden.
         if (controllerConnected()) mShown = false;
@@ -381,8 +398,16 @@ public final class TouchControls extends View implements InputManager.InputDevic
         invalidate();
     }
 
+    private void cancelHold(int id) {
+        if (mHoldRun[id] != null) mHandler.removeCallbacks(mHoldRun[id]);
+        mHoldRun[id] = null;
+        mHoldBtn[id] = null;
+    }
+
     private void releaseAll() {
         for (int i = 0; i < 16; i++) {
+            cancelHold(i);
+            mGuarding[i] = false;
             mKind[i] = K_NONE;
             mOn[i] = null;
         }
@@ -452,8 +477,8 @@ public final class TouchControls extends View implements InputManager.InputDevic
 
     /** Classic: the Switch groups and shapes; mobile: every action has its own group, the shoulders are round. */
     private void setClassicShapes(boolean classic) {
-        setG(A, classic ? "face" : "act");
-        setG(B, classic ? "face" : "roll");
+        setG(A, classic ? "face" : "roll");
+        setG(B, classic ? "face" : "act");
         setG(X, classic ? "face" : "item");
         setG(Y, "face");
         find(L).round = find(R).round = find(ZR).round = !classic;
@@ -472,21 +497,24 @@ public final class TouchControls extends View implements InputManager.InputDevic
      * d-pad, menu, map).
      */
     private void layoutMobile(int w, int h, float u) {
-        circ(R, "r", w - 2.4f * u, h - 2.5f * u, 2.3f * u);       // attack
-        circ(B, "roll", w - 4.9f * u, h - 1.5f * u, 1.6f * u);    // roll / run (hold)
-        circ(L, "l", w - 5.2f * u, h - 3.7f * u, 1.5f * u);       // block
-        circ(X, "item", w - 4.1f * u, h - 5.7f * u, 1.5f * u);    // item: tap uses, swipe changes slot
-        circ(ZR, "zr", w - 1.6f * u, h - 5.1f * u, 1.5f * u);     // heavy attack
-        circ(A, "act", w - 7.0f * u, h - 2.0f * u, 1.3f * u);     // interact / pick up
-        circ(R3, "lock", w - 1.3f * u, h - 7.3f * u, 1.2f * u);   // lock on
+        // Right thumb: ATK in the middle of an arc. Going round it from the top: HVY, ITEM, GUARD (tap parry, hold
+        // block), DODGE (tap roll, hold run), USE (interact). LOCK above them; CFG and ••• in the top corner.
+        circ(R, "r", w - 2.4f * u, h - 2.8f * u, 2.4f * u);        // attack
+        circ(ZR, "zr", w - 2.4f * u, h - 5.8f * u, 1.5f * u);      // heavy attack (hold: two hands)
+        circ(X, "item", w - 4.4f * u, h - 5.0f * u, 1.5f * u);     // item: tap uses it; swipes are the d-pad (up spell, down item, right/left hand)
+        circ(L, "l", w - 5.5f * u, h - 3.3f * u, 1.7f * u);        // guard: tap parry, hold block
+        circ(A, "roll", w - 4.8f * u, h - 1.2f * u, 1.7f * u);     // dodge / run (hold)
+        circ(B, "act", w - 7.2f * u, h - 1.6f * u, 1.4f * u);      // interact / pick up
+        circ(R3, "lock", w - 1.0f * u, h - 7.5f * u, 1.1f * u);    // lock on
         circ(0, "more", w - 1.0f * u, 1.0f * u, 0.9f * u);
-        circ(Y, "face", w - 2.4f * u, 1.0f * u, 1.1f * u);
+        circ(SETTINGS, "cfg", w - 2.4f * u, 1.0f * u, 0.9f * u);   // the Port's settings menu
+        circ(Y, "face", w - 2.4f * u, 3.0f * u, 1.1f * u);          // two hands (not shown: hold HVY)
         float[] p = at("zl", w - 4.3f * u, 1.0f * u);
-        place(ZL, p[0], p[1], 1.9f * u * sz("zl"), 1.0f * u * sz("zl"));
+        place(ZL, p[0], p[1], 1.9f * u * sz("zl"), 1.0f * u * sz("zl"));  // parry (not shown: the guard button taps it)
         circ(L3, "l3", w - 6.0f * u, 1.0f * u, 1.0f * u);
         circ(MINUS, "minus", w / 2f - 1.3f * u, 0.9f * u, 1.0f * u);
         circ(PLUS, "plus", w / 2f + 1.3f * u, 0.9f * u, 1.0f * u);
-        p = at("dpad", w - 3.3f * u, 3.1f * u);
+        p = at("dpad", w - 4.0f * u, 2.7f * u);
         final float ds = 0.85f * u * sz("dpad"), db = 0.85f * u * sz("dpad");
         place(UP, p[0], p[1] - ds, db, db);
         place(DOWN, p[0], p[1] + ds, db, db);
@@ -497,9 +525,11 @@ public final class TouchControls extends View implements InputManager.InputDevic
     /** Mobile style hides the drawer's buttons until it is open (the editor shows everything). */
     private boolean vis(Button b) {
         if (b.bit == 0) return sMobile;
+        if (b.bit == SETTINGS) return true;
+        if (sMobile && (b.bit == Y || b.bit == ZL)) return false;  // two hands / parry: gestures of other buttons
         if (!sMobile || mEditing) return true;
         switch (b.bit) {
-            case ZL: case Y: case L3: case PLUS: case MINUS: case UP: case DOWN: case LEFT: case RIGHT:
+            case L3: case PLUS: case MINUS: case UP: case DOWN: case LEFT: case RIGHT:
                 return mMore;
             default:
                 return true;
@@ -511,10 +541,10 @@ public final class TouchControls extends View implements InputManager.InputDevic
         switch (b.bit) {
             case R: return "ATK";
             case ZR: return "HVY";
-            case L: return "BLK";
-            case B: return "ROLL";
+            case L: return "GUARD";
+            case A: return "DODGE";
             case X: return "ITEM";
-            case A: return "USE";
+            case B: return "USE";
             case Y: return "2H";
             case ZL: return "L-ATK";
             default: return b.label;
@@ -575,6 +605,8 @@ public final class TouchControls extends View implements InputManager.InputDevic
         place(RIGHT, dcx + ds, dcy, db, db);
         p = at("l3", 4.7f * u, h - 0.9f * u);
         place(L3, p[0], p[1], 1.0f * u * sz("l3"), 1.0f * u * sz("l3"));
+        p = at("cfg", w / 2f, 2.4f * u);
+        place(SETTINGS, p[0], p[1], 1.0f * u * sz("cfg"), 1.0f * u * sz("cfg"));
         }
         // Stick: resting spot, and the area where a finger grabs it.
         mStickRadius = 1.6f * u * sz("stick");
@@ -904,6 +936,25 @@ public final class TouchControls extends View implements InputManager.InputDevic
             mKind[id] = K_NONE;
             releaseAll();
             mMore = !mMore;
+        } else if (b != null && b.bit == SETTINGS) {  // the Port's settings menu
+            mKind[id] = K_NONE;
+            releaseAll();
+            SettingsMenu.show(mActivity);
+        } else if (b != null && sMobile && b.bit == L) {  // guard: a tap is the parry, holding blocks
+            mKind[id] = K_GUARD;
+            mOn[id] = b;
+            mGuarding[id] = false;
+            final Runnable r = () -> {
+                mHoldRun[id] = null;
+                if (mKind[id] == K_GUARD && mOn[id] == b && !mGuarding[id]) {
+                    mGuarding[id] = true;
+                    b.pressCount++;
+                    sendState();
+                    invalidate();
+                }
+            };
+            mHoldRun[id] = r;
+            mHandler.postDelayed(r, GUARD_HOLD_MS);
         } else if (b != null && sMobile && b.bit == X) {  // item: tap uses it, a swipe changes the slot
             mKind[id] = K_ITEM;
             mOn[id] = b;
@@ -914,6 +965,21 @@ public final class TouchControls extends View implements InputManager.InputDevic
             mKind[id] = K_BUTTON;
             mOn[id] = b;
             b.pressCount++;
+            if (sMobile && b.bit == ZR) {  // heavy attack held for a second: grab the weapon with two hands
+                final Runnable r = () -> {
+                    mHoldRun[id] = null;
+                    if (mKind[id] == K_BUTTON && mOn[id] == b && mShown && !mEditing) {
+                        pulse(find(Y));
+                        mHoldBtn[id] = null;
+                        invalidate();
+                    }
+                };
+                mHoldRun[id] = r;
+                mHoldBtn[id] = b;
+                mDownMs[id] = android.os.SystemClock.uptimeMillis();
+                mHandler.postDelayed(r, HEAVY_HOLD_MS);
+                postInvalidateOnAnimation();
+            }
         } else if (mStickPointer < 0 && onStick(x, y)) {
             mKind[id] = K_STICK;
             mStickPointer = id;
@@ -944,6 +1010,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
             case K_BUTTON: {  // slide between buttons (e.g. across the face buttons)
                 Button b = hit(x, y);
                 if (b != mOn[id]) {
+                    cancelHold(id);
                     if (mOn[id] != null) mOn[id].pressCount--;
                     mOn[id] = b;
                     if (b != null) b.pressCount++;
@@ -982,7 +1049,13 @@ public final class TouchControls extends View implements InputManager.InputDevic
 
     private void up(int id) {
         if (id < 0 || id >= 16) return;
+        cancelHold(id);
         if (mKind[id] == K_BUTTON && mOn[id] != null) mOn[id].pressCount--;
+        if (mKind[id] == K_GUARD) {
+            if (mGuarding[id] && mOn[id] != null) mOn[id].pressCount--;  // was blocking: lower the guard
+            else pulse(find(ZL));  // a tap: the parry
+            mGuarding[id] = false;
+        }
         if (mKind[id] == K_ITEM && !mSwiped[id]) pulse(find(X));
         if (mKind[id] == K_STICK) mStickPointer = -1;
         if (mKind[id] == K_RSTICK) mRStickPointer = -1;
@@ -1015,6 +1088,122 @@ public final class TouchControls extends View implements InputManager.InputDevic
             if (Math.abs(rx) < 0.06f && Math.abs(ry) < 0.06f) rx = ry = 0;
         }
         nativeState(bits, lx, ly, rx, ry);
+    }
+
+    // ---- skin: vector icons for the mobile style's buttons ---------------------------------------------------
+
+    private static boolean hasSkin(Button b) {
+        switch (b.bit) {
+            case R: case ZR: case L: case A: case B: case X: case R3: case SETTINGS:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void line(Canvas c, float x1, float y1, float x2, float y2) {
+        c.drawLine(x1, y1, x2, y2, mIcon);
+    }
+
+    private void sword(Canvas c, float x, float y, float s) {
+        line(c, x - s, y + s, x + s, y - s);  // blade and handle
+        final float px = x - 0.4f * s, py = y + 0.4f * s, d = 0.45f * s;
+        line(c, px - d, py - d, px + d, py + d);  // cross guard
+    }
+
+    /** A small arrow head at (x, y) pointing along (dx, dy), for the swipe hints. */
+    private void chevron(Canvas c, float x, float y, float dx, float dy, float r) {
+        final float tx = x + dx * r, ty = y + dy * r, bx = x - dx * r, by = y - dy * r, px = -dy * r, py = dx * r;
+        line(c, bx + px, by + py, tx, ty);
+        line(c, bx - px, by - py, tx, ty);
+    }
+
+    private void caption(Canvas c, String t, float x, float y, float size, boolean on) {
+        final float old = mText.getTextSize();
+        final int oc = mText.getColor();
+        mText.setTextSize(size);
+        mText.setColor(on ? 0xFF000000 : 0xFFF2E3B3);
+        c.drawText(t, x, y, mText);
+        mText.setTextSize(old);
+        mText.setColor(oc);
+    }
+
+    private void drawSkin(Canvas c, Button b, boolean on) {
+        final float x = b.cx, y = b.cy, s = b.w * 0.24f, cap = Math.max(8f, b.w * 0.115f);
+        mIcon.setColor(on ? 0xFF000000 : 0xFFF2E3B3);
+        mIcon.setStyle(Paint.Style.STROKE);
+        mIcon.setStrokeWidth(Math.max(2f, b.w * 0.06f));
+        switch (b.bit) {
+            case R:  // attack: sword
+                sword(c, x, y, s * 1.2f);
+                break;
+            case ZR:  // heavy attack: thick sword; hold = two hands
+                mIcon.setStrokeWidth(Math.max(3f, b.w * 0.09f));
+                sword(c, x, y - s * 0.2f, s);
+                caption(c, "HOLD 2H", x, y + b.w * 0.34f, cap, on);
+                break;
+            case L: {  // guard: shield; tap = parry, hold = block
+                mPath.reset();
+                mPath.moveTo(x - 0.8f * s, y - 0.9f * s);
+                mPath.lineTo(x + 0.8f * s, y - 0.9f * s);
+                mPath.lineTo(x + 0.8f * s, y + 0.05f * s);
+                mPath.quadTo(x + 0.8f * s, y + 0.65f * s, x, y + 0.95f * s);
+                mPath.quadTo(x - 0.8f * s, y + 0.65f * s, x - 0.8f * s, y + 0.05f * s);
+                mPath.close();
+                c.drawPath(mPath, mIcon);
+                line(c, x, y - 0.9f * s, x, y + 0.95f * s);
+                caption(c, "TAP/HOLD", x, y + b.w * 0.36f, cap, on);
+                break;
+            }
+            case A:  // dodge: double chevron; tap = roll, hold = run
+                for (int k = 0; k < 2; k++) {
+                    final float ox = x + (k - 0.5f) * 0.85f * s;
+                    line(c, ox - 0.45f * s, y - 0.8f * s, ox + 0.35f * s, y);
+                    line(c, ox + 0.35f * s, y, ox - 0.45f * s, y + 0.8f * s);
+                }
+                caption(c, "ROLL/RUN", x, y + b.w * 0.36f, cap, on);
+                break;
+            case B: {  // use / interact: open hand
+                mRect.set(x - 0.6f * s, y - 0.05f * s, x + 0.6f * s, y + 0.95f * s);
+                c.drawRoundRect(mRect, 0.3f * s, 0.3f * s, mIcon);
+                for (int k = 0; k < 4; k++) {
+                    final float fx = x + (k - 1.5f) * 0.4f * s;
+                    line(c, fx, y - 0.05f * s, fx, y - (k == 1 || k == 2 ? 1.05f : 0.85f) * s);
+                }
+                break;
+            }
+            case X: {  // item: flask; tap = use, swipes = d-pad (up spell, down item, right weapon, left shield)
+                line(c, x - 0.28f * s, y - 0.95f * s, x - 0.28f * s, y - 0.25f * s);
+                line(c, x + 0.28f * s, y - 0.95f * s, x + 0.28f * s, y - 0.25f * s);
+                line(c, x - 0.45f * s, y - 0.95f * s, x + 0.45f * s, y - 0.95f * s);
+                c.drawCircle(x, y + 0.35f * s, 0.7f * s, mIcon);
+                mIcon.setAlpha(150);
+                mIcon.setStrokeWidth(Math.max(2f, b.w * 0.04f));
+                final float g = b.w * 0.38f, r = b.w * 0.055f;
+                chevron(c, x - g, y, -1f, 0f, r);
+                chevron(c, x + g, y, 1f, 0f, r);
+                chevron(c, x, y - g, 0f, -1f, r);
+                chevron(c, x, y + g, 0f, 1f, r);
+                break;
+            }
+            case R3:  // lock on: crosshair
+                c.drawCircle(x, y, 0.55f * s, mIcon);
+                line(c, x - 1.15f * s, y, x - 0.8f * s, y);
+                line(c, x + 0.8f * s, y, x + 1.15f * s, y);
+                line(c, x, y - 1.15f * s, x, y - 0.8f * s);
+                line(c, x, y + 0.8f * s, x, y + 1.15f * s);
+                break;
+            case SETTINGS:  // the Port's settings: gear
+                c.drawCircle(x, y, 0.5f * s, mIcon);
+                for (int k = 0; k < 8; k++) {
+                    final double a = Math.PI * k / 4.0;
+                    final float cs = (float) Math.cos(a), sn = (float) Math.sin(a);
+                    line(c, x + cs * 0.8f * s, y + sn * 0.8f * s, x + cs * 1.1f * s, y + sn * 1.1f * s);
+                }
+                break;
+            default:
+                break;
+        }
     }
 
     // ---- drawing --------------------------------------------------------------------------------------------
@@ -1057,11 +1246,15 @@ public final class TouchControls extends View implements InputManager.InputDevic
             c.drawCircle(mRBaseX + dx, mRBaseY + dy, mRRadius * 0.45f, mFill);
         }
         // Buttons.
+        boolean holding = false;
+        final long now = android.os.SystemClock.uptimeMillis();
         for (Button b : mButtons) {
             if (!vis(b)) continue;
             boolean on = b.pressCount > 0 || (b.bit == 0 && mMore);
+            final boolean skin = sMobile && hasSkin(b);
             mFill.setColor(mEditing && (b.group.equals(mDragGroup) || b.group.equals(mSelGroup)) ? 0xC0C9A55C
                     : on ? 0x90FFFFFF : 0x50000000);
+            if (skin) mStroke.setColor(0xFFC9A55C);  // skin: gold ring, icon inside
             if (b.round) {
                 c.drawCircle(b.cx, b.cy, b.w / 2, mFill);
                 c.drawCircle(b.cx, b.cy, b.w / 2, mStroke);
@@ -1071,13 +1264,30 @@ public final class TouchControls extends View implements InputManager.InputDevic
                 c.drawRoundRect(mRect, r, r, mFill);
                 c.drawRoundRect(mRect, r, r, mStroke);
             }
-            mText.setColor(on ? 0xFF000000 : 0xFFFFFFFF);
-            float size = mText.getTextSize();
-            final String lab = labelOf(b);
-            if (lab.length() > 2) mText.setTextSize(size * (lab.length() > 3 ? 0.62f : 0.7f));
-            c.drawText(lab, b.cx, b.cy - (mText.descent() + mText.ascent()) / 2, mText);
-            mText.setTextSize(size);
+            if (skin) mStroke.setColor(0xFFFFFFFF);
+            if (skin) {
+                drawSkin(c, b, on);
+            } else {
+                mText.setColor(on ? 0xFF000000 : 0xFFFFFFFF);
+                float size = mText.getTextSize();
+                final String lab = labelOf(b);
+                if (lab.length() > 2) mText.setTextSize(size * (lab.length() > 3 ? 0.62f : 0.7f));
+                c.drawText(lab, b.cx, b.cy - (mText.descent() + mText.ascent()) / 2, mText);
+                mText.setTextSize(size);
+            }
+            // Hold progress (heavy attack -> two hands): a ring that fills in a second.
+            for (int i = 0; i < 16; i++) {
+                if (mHoldBtn[i] != b || mHoldRun[i] == null) continue;
+                final float prog = Math.min(1f, (now - mDownMs[i]) / (float) HEAVY_HOLD_MS);
+                final float rr = b.w / 2 + 0.06f * b.w;
+                mRect.set(b.cx - rr, b.cy - rr, b.cx + rr, b.cy + rr);
+                mIcon.setColor(0xFFC9A55C);
+                mIcon.setStrokeWidth(Math.max(3f, 0.07f * b.w));
+                c.drawArc(mRect, -90f, 360f * prog, false, mIcon);
+                holding = true;
+            }
         }
+        if (holding) postInvalidateOnAnimation();
         if (mEditing) drawEditor(c);
     }
 }
