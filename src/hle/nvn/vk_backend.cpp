@@ -3501,6 +3501,35 @@ private:
         }
     }
 
+    // no_dof: fills the target of a dropped depth-of-field blur pass with that pass's own colour input (the first 2D
+    // colour texture it samples), scaled to the target's size with a linear filter. If the pass has no such input
+    // (it reads only depth, say) nothing is copied and the target stays as it was (the old behaviour).
+    uint64_t dof_copies_ = 0, dof_copy_fails_ = 0;
+    void DofPassThrough(uint32_t texture_mask, Image* dst) {
+        if (!dst || IsDepthFormat(dst->nvn_format)) return;
+        Image* src = nullptr;
+        uint32_t src_slot = 0;
+        for (uint32_t slot = 0; slot < 32 && !src; slot++) {
+            if (!(texture_mask >> slot & 1)) continue;
+            BoundTexture bt = st_.textures[1][slot];
+            if (!bt.valid) bt = HandleFromUniforms(1, slot);
+            Image* img = bt.valid ? GetImage(bt.texture, true) : nullptr;
+            if (!img || img == dst || IsDepthFormat(img->nvn_format) || img->layers > 1) continue;
+            src = img;
+            src_slot = slot;
+        }
+        if (!src) {
+            if (dof_copy_fails_++ < 8) LOGI(kTag, "no_dof: a blur pass into %dx%d has no colour input to copy", dst->width, dst->height);
+            return;
+        }
+        Begin();
+        EndRendering();
+        CopyImage(*src, CopyRegion{}, *dst, CopyRegion{}, 0x1);
+        if (dof_copies_++ < 12)
+            LOGI(kTag, "no_dof: blur pass copies fs%u (%dx%d fmt %d) into its target (%dx%d fmt %d)", src_slot,
+                 src->width, src->height, src->nvn_format, dst->width, dst->height, dst->nvn_format);
+    }
+
     // Linear buffer data (row stride from SetCopyRowStride, 0 = tight) into a texture region.
     // Small tables filled by buffer->texture copies (the gamma ramp: 256x1, filled twice at start-up and never
     // copied again): the copy source is watched, and when the game rewrites it the copy is repeated.
@@ -4337,14 +4366,17 @@ private:
             (pcfg.no_dof || pcfg.no_bloom) && st_.program[1] && !colors.empty() && colors[0]) {
             const uint64_t h = st_.program[1]->hash;
             const int w = colors[0]->width;
-            bool drop = false;
+            bool drop = false, dof_hit = false;
             if (pcfg.no_dof)
-                drop = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull || h == 0xcdeb232ada05c0afull ||
-                       h == 0xf503d9c09783ac14ull;
+                drop = dof_hit = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull ||
+                                 h == 0xcdeb232ada05c0afull || h == 0xf503d9c09783ac14ull;
             if (pcfg.no_bloom && !drop)
                 drop = h == 0xc3d56b6401ccb572ull || h == 0x512397bbc420f850ull || h == 0x9b44066e84ff04c6ull ||
                        h == 0x82aa25701a19c22bull;
             if (drop) {
+                // A dropped blur pass must not leave its target cleared: the final pass blends that target in wherever
+                // the game blurs (distance: sky, water) and the picture goes black. Copy the pass's own input instead.
+                if (dof_hit && !pcfg.no_dof_legacy) DofPassThrough(fs->info.texture_mask, colors[0]);
                 if (postfx_dropped_++ == 0)
                     LOGI(kTag, "no_dof / no_bloom: effect passes skipped (first one into %dx%d)", w, colors[0]->height);
                 return;

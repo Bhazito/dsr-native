@@ -68,6 +68,9 @@ struct RuntimeConfig {
     // no_dof / no_bloom = 1: the depth-of-field (blur by distance) and bloom (glow) passes are not drawn (found by pixel
     // shader hash with the "postfx pass" log); their results stay cleared.
     bool no_dof = false, no_bloom = false;
+    // no_dof = 2: the old behaviour (blur passes dropped, their targets stay cleared: black where the game blurs).
+    // no_dof = 1: a dropped blur pass copies its own input into its target instead (a blur that blurs nothing).
+    bool no_dof_legacy = false;
     // game_hooks = 0: none of the engine patches (frame rate, resolution, log hooks) are installed.
     bool game_hooks = true;
     // render_pass_objects = 1: VkRenderPass / VkFramebuffer objects even when the driver has dynamic rendering

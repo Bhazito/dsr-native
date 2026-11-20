@@ -466,7 +466,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
             else if (!strcmp(key, "max_anisotropy")) cfg->max_anisotropy = v;
             else if (!strcmp(key, "shadow_compare")) cfg->shadow_compare = std::clamp(v, 0, 3);
             else if (!strcmp(key, "skip_shadows")) cfg->skip_shadows = v != 0;
-                else if (!strcmp(key, "no_dof")) cfg->no_dof = v != 0;
+                else if (!strcmp(key, "no_dof")) { cfg->no_dof = v != 0; cfg->no_dof_legacy = v == 2; }
             else if (!strcmp(key, "no_bloom")) cfg->no_bloom = v != 0;
             else if (!strcmp(key, "skip_small_passes")) cfg->skip_small_passes = std::clamp(v, 0, 1000000);
             else if (!strcmp(key, "game_hooks")) cfg->game_hooks = v != 0;
