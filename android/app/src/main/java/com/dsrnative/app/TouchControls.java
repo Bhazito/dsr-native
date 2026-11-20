@@ -39,8 +39,11 @@ public final class TouchControls extends View implements InputManager.InputDevic
             DOWN = 1 << 15;
     /** Not a Switch button: the on-screen button that opens the Port's settings menu. */
     static final int SETTINGS = 1 << 30;
-    /** Mobile style: hold the heavy attack this long to grab the weapon with two hands. */
-    static final long HEAVY_HOLD_MS = 1000;
+    /**
+     * Mobile style: the heavy attack waits this long for a swipe up (two hands) before it is pressed and held; a
+     * tap released sooner is pressed when the finger lifts.
+     */
+    static final long HEAVY_COMMIT_MS = 150;
     /** Mobile style: a guard/parry touch held this long is a block (shorter: a parry). */
     static final long GUARD_HOLD_MS = 180;
 
@@ -203,14 +206,14 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private boolean mShown = true;
 
-    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3, K_ITEM = 4, K_GUARD = 5;
+    private static final int K_BUTTON = 0, K_STICK = 1, K_RSTICK = 2, K_NONE = 3, K_ITEM = 4, K_GUARD = 5, K_HEAVY = 6;
     private boolean mMore;  // mobile style: the drawer with the secondary buttons is open
     private final float[] mStartX = new float[16], mStartY = new float[16];
     private final boolean[] mSwiped = new boolean[16];
-    // Holds: per finger, a timer that fires after a long press (heavy attack -> two hands, guard/parry -> block).
+    // Holds: per finger, a timer that fires after a press (guard/parry -> block, heavy attack -> pressed and held).
     private final Runnable[] mHoldRun = new Runnable[16];
-    private final Button[] mHoldBtn = new Button[16];
-    private final long[] mDownMs = new long[16];
+    /** Heavy attack: the finger's ZR is pressed (held) already. */
+    private final boolean[] mHeavyOn = new boolean[16];
     private final boolean[] mGuarding = new boolean[16];
     private final Paint mIcon = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final android.graphics.Path mPath = new android.graphics.Path();
@@ -401,13 +404,13 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private void cancelHold(int id) {
         if (mHoldRun[id] != null) mHandler.removeCallbacks(mHoldRun[id]);
         mHoldRun[id] = null;
-        mHoldBtn[id] = null;
     }
 
     private void releaseAll() {
         for (int i = 0; i < 16; i++) {
             cancelHold(i);
             mGuarding[i] = false;
+            mHeavyOn[i] = false;
             mKind[i] = K_NONE;
             mOn[i] = null;
         }
@@ -479,8 +482,8 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private void setClassicShapes(boolean classic) {
         setG(A, classic ? "face" : "roll");
         setG(B, classic ? "face" : "act");
-        setG(X, classic ? "face" : "item");
-        setG(Y, "face");
+        setG(Y, classic ? "face" : "item");  // Y is the game's "use item" (X is two hands)
+        setG(X, "face");
         find(L).round = find(R).round = find(ZR).round = !classic;
     }
 
@@ -500,15 +503,15 @@ public final class TouchControls extends View implements InputManager.InputDevic
         // Right thumb: ATK in the middle of an arc. Going round it from the top: HVY, ITEM, GUARD (tap parry, hold
         // block), DODGE (tap roll, hold run), USE (interact). LOCK above them; CFG and ••• in the top corner.
         circ(R, "r", w - 2.4f * u, h - 2.8f * u, 2.4f * u);        // attack
-        circ(ZR, "zr", w - 2.4f * u, h - 5.8f * u, 1.5f * u);      // heavy attack (hold: two hands)
-        circ(X, "item", w - 4.4f * u, h - 5.0f * u, 1.5f * u);     // item: tap uses it; swipes are the d-pad (up spell, down item, right/left hand)
+        circ(ZR, "zr", w - 2.4f * u, h - 5.8f * u, 1.5f * u);      // heavy attack (swipe up: two hands)
+        circ(Y, "item", w - 4.4f * u, h - 5.0f * u, 1.5f * u);     // item: tap uses it; swipes are the d-pad (up spell, down item, right/left hand)
         circ(L, "l", w - 5.5f * u, h - 3.3f * u, 1.7f * u);        // guard: tap parry, hold block
         circ(A, "roll", w - 4.8f * u, h - 1.2f * u, 1.7f * u);     // dodge / run (hold)
         circ(B, "act", w - 7.2f * u, h - 1.6f * u, 1.4f * u);      // interact / pick up
         circ(R3, "lock", w - 1.0f * u, h - 7.5f * u, 1.1f * u);    // lock on
         circ(0, "more", w - 1.0f * u, 1.0f * u, 0.9f * u);
         circ(SETTINGS, "cfg", w - 2.4f * u, 1.0f * u, 0.9f * u);   // the Port's settings menu
-        circ(Y, "face", w - 2.4f * u, 3.0f * u, 1.1f * u);          // two hands (not shown: hold HVY)
+        circ(X, "face", w - 2.4f * u, 3.0f * u, 1.1f * u);          // two hands (not shown: swipe up on HVY)
         float[] p = at("zl", w - 4.3f * u, 1.0f * u);
         place(ZL, p[0], p[1], 1.9f * u * sz("zl"), 1.0f * u * sz("zl"));  // parry (not shown: the guard button taps it)
         circ(L3, "l3", w - 6.0f * u, 1.0f * u, 1.0f * u);
@@ -526,7 +529,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
     private boolean vis(Button b) {
         if (b.bit == 0) return sMobile;
         if (b.bit == SETTINGS) return true;
-        if (sMobile && (b.bit == Y || b.bit == ZL)) return false;  // two hands / parry: gestures of other buttons
+        if (sMobile && (b.bit == X || b.bit == ZL)) return false;  // two hands / parry: gestures of other buttons
         if (!sMobile || mEditing) return true;
         switch (b.bit) {
             case L3: case PLUS: case MINUS: case UP: case DOWN: case LEFT: case RIGHT:
@@ -543,9 +546,9 @@ public final class TouchControls extends View implements InputManager.InputDevic
             case ZR: return "HVY";
             case L: return "GUARD";
             case A: return "DODGE";
-            case X: return "ITEM";
+            case Y: return "ITEM";
             case B: return "USE";
-            case Y: return "2H";
+            case X: return "2H";
             case ZL: return "L-ATK";
             default: return b.label;
         }
@@ -955,31 +958,36 @@ public final class TouchControls extends View implements InputManager.InputDevic
             };
             mHoldRun[id] = r;
             mHandler.postDelayed(r, GUARD_HOLD_MS);
-        } else if (b != null && sMobile && b.bit == X) {  // item: tap uses it, a swipe changes the slot
+        } else if (b != null && sMobile && b.bit == Y) {  // item: tap uses it, a swipe changes the slot
             mKind[id] = K_ITEM;
             mOn[id] = b;
             mStartX[id] = x;
             mStartY[id] = y;
             mSwiped[id] = false;
+        } else if (b != null && sMobile && b.bit == ZR) {
+            // heavy attack: a swipe up grabs the weapon with two hands; otherwise it is the heavy attack (a tap is
+            // pressed when the finger lifts, a finger that stays is pressed and held after HEAVY_COMMIT_MS)
+            mKind[id] = K_HEAVY;
+            mOn[id] = b;
+            mStartX[id] = x;
+            mStartY[id] = y;
+            mSwiped[id] = false;
+            mHeavyOn[id] = false;
+            final Runnable r = () -> {
+                mHoldRun[id] = null;
+                if (mKind[id] == K_HEAVY && mOn[id] == b && !mSwiped[id] && !mHeavyOn[id]) {
+                    mHeavyOn[id] = true;
+                    b.pressCount++;
+                    sendState();
+                    invalidate();
+                }
+            };
+            mHoldRun[id] = r;
+            mHandler.postDelayed(r, HEAVY_COMMIT_MS);
         } else if (b != null) {
             mKind[id] = K_BUTTON;
             mOn[id] = b;
             b.pressCount++;
-            if (sMobile && b.bit == ZR) {  // heavy attack held for a second: grab the weapon with two hands
-                final Runnable r = () -> {
-                    mHoldRun[id] = null;
-                    if (mKind[id] == K_BUTTON && mOn[id] == b && mShown && !mEditing) {
-                        pulse(find(Y));
-                        mHoldBtn[id] = null;
-                        invalidate();
-                    }
-                };
-                mHoldRun[id] = r;
-                mHoldBtn[id] = b;
-                mDownMs[id] = android.os.SystemClock.uptimeMillis();
-                mHandler.postDelayed(r, HEAVY_HOLD_MS);
-                postInvalidateOnAnimation();
-            }
         } else if (mStickPointer < 0 && onStick(x, y)) {
             mKind[id] = K_STICK;
             mStickPointer = id;
@@ -1014,6 +1022,16 @@ public final class TouchControls extends View implements InputManager.InputDevic
                     if (mOn[id] != null) mOn[id].pressCount--;
                     mOn[id] = b;
                     if (b != null) b.pressCount++;
+                }
+                break;
+            }
+            case K_HEAVY: {
+                float dx = x - mStartX[id], dy = y - mStartY[id];
+                // swipe up before the heavy attack was pressed: two hands (X), and no heavy attack
+                if (!mSwiped[id] && !mHeavyOn[id] && dy < -0.6f * mU && -dy > Math.abs(dx)) {
+                    mSwiped[id] = true;
+                    cancelHold(id);
+                    pulse(find(X));
                 }
                 break;
             }
@@ -1056,7 +1074,12 @@ public final class TouchControls extends View implements InputManager.InputDevic
             else pulse(find(ZL));  // a tap: the parry
             mGuarding[id] = false;
         }
-        if (mKind[id] == K_ITEM && !mSwiped[id]) pulse(find(X));
+        if (mKind[id] == K_ITEM && !mSwiped[id]) pulse(find(Y));
+        if (mKind[id] == K_HEAVY) {
+            if (mHeavyOn[id] && mOn[id] != null) mOn[id].pressCount--;  // was held: let go
+            else if (!mSwiped[id] && mOn[id] != null) pulse(mOn[id]);   // a quick tap: the heavy attack
+            mHeavyOn[id] = false;
+        }
         if (mKind[id] == K_STICK) mStickPointer = -1;
         if (mKind[id] == K_RSTICK) mRStickPointer = -1;
         mKind[id] = K_NONE;
@@ -1094,7 +1117,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
 
     private static boolean hasSkin(Button b) {
         switch (b.bit) {
-            case R: case ZR: case L: case A: case B: case X: case R3: case SETTINGS:
+            case R: case ZR: case L: case A: case B: case Y: case R3: case SETTINGS:
                 return true;
             default:
                 return false;
@@ -1137,10 +1160,13 @@ public final class TouchControls extends View implements InputManager.InputDevic
             case R:  // attack: sword
                 sword(c, x, y, s * 1.2f);
                 break;
-            case ZR:  // heavy attack: thick sword; hold = two hands
+            case ZR:  // heavy attack: thick sword; swipe up = two hands
                 mIcon.setStrokeWidth(Math.max(3f, b.w * 0.09f));
                 sword(c, x, y - s * 0.2f, s);
-                caption(c, "HOLD 2H", x, y + b.w * 0.34f, cap, on);
+                caption(c, "2H", x, y + b.w * 0.34f, cap, on);
+                mIcon.setAlpha(150);
+                mIcon.setStrokeWidth(Math.max(2f, b.w * 0.04f));
+                chevron(c, x, y - b.w * 0.38f, 0f, -1f, b.w * 0.055f);
                 break;
             case L: {  // guard: shield; tap = parry, hold = block
                 mPath.reset();
@@ -1172,7 +1198,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
                 }
                 break;
             }
-            case X: {  // item: flask; tap = use, swipes = d-pad (up spell, down item, right weapon, left shield)
+            case Y: {  // item: flask; tap = use, swipes = d-pad (up spell, down item, right weapon, left shield)
                 line(c, x - 0.28f * s, y - 0.95f * s, x - 0.28f * s, y - 0.25f * s);
                 line(c, x + 0.28f * s, y - 0.95f * s, x + 0.28f * s, y - 0.25f * s);
                 line(c, x - 0.45f * s, y - 0.95f * s, x + 0.45f * s, y - 0.95f * s);
@@ -1246,8 +1272,6 @@ public final class TouchControls extends View implements InputManager.InputDevic
             c.drawCircle(mRBaseX + dx, mRBaseY + dy, mRRadius * 0.45f, mFill);
         }
         // Buttons.
-        boolean holding = false;
-        final long now = android.os.SystemClock.uptimeMillis();
         for (Button b : mButtons) {
             if (!vis(b)) continue;
             boolean on = b.pressCount > 0 || (b.bit == 0 && mMore);
@@ -1275,19 +1299,7 @@ public final class TouchControls extends View implements InputManager.InputDevic
                 c.drawText(lab, b.cx, b.cy - (mText.descent() + mText.ascent()) / 2, mText);
                 mText.setTextSize(size);
             }
-            // Hold progress (heavy attack -> two hands): a ring that fills in a second.
-            for (int i = 0; i < 16; i++) {
-                if (mHoldBtn[i] != b || mHoldRun[i] == null) continue;
-                final float prog = Math.min(1f, (now - mDownMs[i]) / (float) HEAVY_HOLD_MS);
-                final float rr = b.w / 2 + 0.06f * b.w;
-                mRect.set(b.cx - rr, b.cy - rr, b.cx + rr, b.cy + rr);
-                mIcon.setColor(0xFFC9A55C);
-                mIcon.setStrokeWidth(Math.max(3f, 0.07f * b.w));
-                c.drawArc(mRect, -90f, 360f * prog, false, mIcon);
-                holding = true;
-            }
         }
-        if (holding) postInvalidateOnAnimation();
         if (mEditing) drawEditor(c);
     }
 }

@@ -1510,8 +1510,14 @@ private:
             LOGI(kTag, "aspect ratio: HUD and menus drawn in a centred %dx%d box of the %dx720 frame", hud_box_w_,
                  hud_box_h_, rw);
         }
+        // Mali's own (system) Vulkan driver, r40: the GPU stops answering ("GPU did not finish within 5 s", then
+        // vkQueueSubmit -4 = device lost) a while after new areas load, with dynamic rendering. A custom driver does
+        // not hang, so on that combination render pass objects are used, as with render_pass_objects = 1.
+        const bool mali_system_driver = dsr::GetRuntime().config.gpu_driver_lib.empty() && strstr(props_.deviceName, "Mali");
         if (en13.dynamicRendering && dsr::GetRuntime().config.render_pass_objects)
             LOGI(kTag, "settings render_pass_objects = 1: render pass objects instead of the driver's dynamic rendering");
+        else if (en13.dynamicRendering && mali_system_driver)
+            LOGI(kTag, "Mali system driver: render pass objects instead of its dynamic rendering (avoids GPU hangs)");
         else if (en13.dynamicRendering) {
             begin_rendering_ = reinterpret_cast<PFN_vkCmdBeginRendering>(vkGetDeviceProcAddr(device_, "vkCmdBeginRendering"));
             end_rendering_ = reinterpret_cast<PFN_vkCmdEndRendering>(vkGetDeviceProcAddr(device_, "vkCmdEndRendering"));
@@ -3131,7 +3137,7 @@ private:
         VkResult r = vkQueueSubmit(queue_, 1, &si, sl.fence);
         if (r != VK_SUCCESS) {
             static std::atomic<bool> logged{false};
-            if (!logged.exchange(true)) LOGW(kTag, "vkQueueSubmit failed: %d", r);
+            if (!logged.exchange(true)) LOGW(kTag, "vkQueueSubmit failed: %d%s", r, r == VK_ERROR_DEVICE_LOST ? " (device lost: the GPU hung)" : "");
             vkQueueSubmit(queue_, 0, nullptr, sl.fence);  // the render thread waits on this fence
         }
         sl.submits_done.fetch_add(1, std::memory_order_release);
@@ -3217,7 +3223,8 @@ private:
             WaitSubmitted(sl);
             MsTimer wait_timer(wait_ms_);
             VkResult r = vkWaitForFences(device_, 1, &sl.fence, VK_TRUE, 5000000000ull);
-            if (r != VK_SUCCESS) LogOnce("fence", "GPU did not finish within 5 s (%d)", r);
+            if (r != VK_SUCCESS)
+                LogOnce("fence", "GPU did not finish within 5 s (%d): the driver hung or lost the device", r);
             DeliverReadbacks(sl);
             CollectGpuTime(sl);
             vkResetFences(device_, 1, &sl.fence);
