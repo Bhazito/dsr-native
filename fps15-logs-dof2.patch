@@ -1,0 +1,234 @@
+diff --git a/android/app/src/main/java/com/dsrnative/app/SettingsMenu.java b/android/app/src/main/java/com/dsrnative/app/SettingsMenu.java
+index ec81cfa..a32c821 100644
+--- a/android/app/src/main/java/com/dsrnative/app/SettingsMenu.java
++++ b/android/app/src/main/java/com/dsrnative/app/SettingsMenu.java
+@@ -431,8 +431,8 @@ public final class SettingsMenu {
+     private void buildGraphicsTab() {
+         section(Strings.t("sec_display"));
+         choice("fps", Strings.t("fps_t"), Strings.t("fps_auto_n") + " " + Strings.t("changes_now"),
+-                new String[] {"20", "30", "45", "60", "auto"},
+-                new String[] {"20 fps", "30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
++                new String[] {"15", "20", "30", "45", "60", "auto"},
++                new String[] {"15 fps", "20 fps", "30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
+         choice("present_mode", Strings.t("present_t"), Strings.t("changes_next"),
+                 new String[] {"fifo", "mailbox"},
+                 new String[] {Strings.t("present_vsync") + " " + Strings.t("default_mark"), Strings.t("present_mailbox")},
+diff --git a/src/hle/nvn/null_driver.cpp b/src/hle/nvn/null_driver.cpp
+index a6505d1..e810c78 100644
+--- a/src/hle/nvn/null_driver.cpp
++++ b/src/hle/nvn/null_driver.cpp
+@@ -512,8 +512,9 @@ void QueuePresentTexture(void* queue, void* window, int index) {
+     }
+     if (next > now)
+         std::this_thread::sleep_until(next);
+-    else if (now - next > frame * 4)
+-        next = now;  // fell behind (loading): resync instead of bursting
++    else if (now - next > frame / 8)
++        next = now - frame / 8;  // fell behind: forget the debt. Paying it back (frames presented early, back to back
++                                 // until the schedule caught up) showed as 25-30 fps for a second after every slow stretch
+     next += frame;
+ 
+     TexRef tex = WindowTexture(window, index);
+diff --git a/src/hle/nvn/vk_backend.cpp b/src/hle/nvn/vk_backend.cpp
+index d2c3e6e..548d393 100644
+--- a/src/hle/nvn/vk_backend.cpp
++++ b/src/hle/nvn/vk_backend.cpp
+@@ -3505,7 +3505,7 @@ private:
+     // colour texture it samples), scaled to the target's size with a linear filter. If the pass has no such input
+     // (it reads only depth, say) nothing is copied and the target stays as it was (the old behaviour).
+     uint64_t dof_copies_ = 0, dof_copy_fails_ = 0;
+-    void DofPassThrough(uint32_t texture_mask, Image* dst) {
++    void DofPassThrough(uint32_t texture_mask, Image* dst, bool same_size) {
+         if (!dst || IsDepthFormat(dst->nvn_format)) return;
+         Image* src = nullptr;
+         uint32_t src_slot = 0;
+@@ -3515,6 +3515,7 @@ private:
+             if (!bt.valid) bt = HandleFromUniforms(1, slot);
+             Image* img = bt.valid ? GetImage(bt.texture, true) : nullptr;
+             if (!img || img == dst || IsDepthFormat(img->nvn_format) || img->layers > 1) continue;
++            if (same_size && (img->width != dst->width || img->height != dst->height)) continue;  // the sharp scene
+             src = img;
+             src_slot = slot;
+         }
+@@ -4370,13 +4371,18 @@ private:
+             if (pcfg.no_dof)
+                 drop = dof_hit = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull ||
+                                  h == 0xcdeb232ada05c0afull || h == 0xf503d9c09783ac14ull;
++            // The pass that blends the blurred copy over the sharp scene (18 instructions: the blurred 320x180 image
++            // and the 640x360 scene): with the blur gone it must pass the sharp scene through, or the water and the
++            // whole picture after a hit (where the blend weight rises) come out as the low-resolution copy.
++            const bool dof_composite = pcfg.no_dof && !pcfg.no_dof_legacy && h == 0x19ddf6396f2540b7ull;
++            if (dof_composite) drop = dof_hit = true;
+             if (pcfg.no_bloom && !drop)
+                 drop = h == 0xc3d56b6401ccb572ull || h == 0x512397bbc420f850ull || h == 0x9b44066e84ff04c6ull ||
+                        h == 0x82aa25701a19c22bull;
+             if (drop) {
+                 // A dropped blur pass must not leave its target cleared: the final pass blends that target in wherever
+                 // the game blurs (distance: sky, water) and the picture goes black. Copy the pass's own input instead.
+-                if (dof_hit && !pcfg.no_dof_legacy) DofPassThrough(fs->info.texture_mask, colors[0]);
++                if (dof_hit && !pcfg.no_dof_legacy) DofPassThrough(fs->info.texture_mask, colors[0], dof_composite);
+                 if (postfx_dropped_++ == 0)
+                     LOGI(kTag, "no_dof / no_bloom: effect passes skipped (first one into %dx%d)", w, colors[0]->height);
+                 return;
+diff --git a/src/platform/android/android_main.cpp b/src/platform/android/android_main.cpp
+index 25fa610..2ca0308 100644
+--- a/src/platform/android/android_main.cpp
++++ b/src/platform/android/android_main.cpp
+@@ -241,8 +241,98 @@ int CreateUserFileImpl(const char* name, const char* mime_type) {
+     return fd;
+ }
+ 
++
++// Keeps the logs folder to two sessions: before a new session's log is created, every session older than the newest
++// one is deleted (a session = dsr_<date>_<time>.txt and its _logcat.txt), so after this run there are two. Only the
++// files this app created can be deleted; any failure is ignored.
++void PruneOldLogs(android_app* app) {
++    JavaVM* vm = app->activity->vm;
++    JNIEnv* env = nullptr;
++    bool attached_here = false;
++    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK || !env) {
++        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) return;
++        attached_here = true;
++    }
++    std::string why;
++    do {
++        jclass dl_cls = env->FindClass("android/provider/MediaStore$Downloads");
++        if (JniFailed(env, &why, "FindClass MediaStore.Downloads") || !dl_cls) break;
++        jfieldID uri_field = env->GetStaticFieldID(dl_cls, "EXTERNAL_CONTENT_URI", "Landroid/net/Uri;");
++        if (JniFailed(env, &why, "EXTERNAL_CONTENT_URI")) break;
++        jobject collection = env->GetStaticObjectField(dl_cls, uri_field);
++        jclass act_cls = env->GetObjectClass(app->activity->clazz);
++        jmethodID get_cr = env->GetMethodID(act_cls, "getContentResolver", "()Landroid/content/ContentResolver;");
++        jobject resolver = env->CallObjectMethod(app->activity->clazz, get_cr);
++        if (JniFailed(env, &why, "getContentResolver") || !resolver) break;
++        jclass cr_cls = env->GetObjectClass(resolver);
++        jmethodID query = env->GetMethodID(cr_cls, "query",
++            "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;");
++        jmethodID del = env->GetMethodID(cr_cls, "delete", "(Landroid/net/Uri;Ljava/lang/String;[Ljava/lang/String;)I");
++        if (JniFailed(env, &why, "ContentResolver methods")) break;
++
++        jclass str_cls = env->FindClass("java/lang/String");
++        jobjectArray proj = env->NewObjectArray(2, str_cls, nullptr);
++        jstring c0 = env->NewStringUTF("_id"), c1 = env->NewStringUTF("_display_name");
++        env->SetObjectArrayElement(proj, 0, c0);
++        env->SetObjectArrayElement(proj, 1, c1);
++        jstring sel = env->NewStringUTF("relative_path LIKE ? AND _display_name LIKE ? AND _display_name LIKE ?");
++        jobjectArray args = env->NewObjectArray(3, str_cls, nullptr);
++        const char* a[3] = {"Download/DSRNative/logs%", "dsr_2%", "%.txt"};
++        for (int i = 0; i < 3; i++) {
++            jstring v = env->NewStringUTF(a[i]);
++            env->SetObjectArrayElement(args, i, v);
++            env->DeleteLocalRef(v);
++        }
++        jobject cursor = env->CallObjectMethod(resolver, query, collection, proj, sel, args, (jstring) nullptr);
++        if (JniFailed(env, &why, "ContentResolver.query") || !cursor) break;
++        jclass cur_cls = env->GetObjectClass(cursor);
++        jmethodID move_next = env->GetMethodID(cur_cls, "moveToNext", "()Z");
++        jmethodID get_long = env->GetMethodID(cur_cls, "getLong", "(I)J");
++        jmethodID get_str = env->GetMethodID(cur_cls, "getString", "(I)Ljava/lang/String;");
++        jmethodID close = env->GetMethodID(cur_cls, "close", "()V");
++        std::vector<std::pair<std::string, long long>> rows;  // (name, _id)
++        while (env->CallBooleanMethod(cursor, move_next)) {
++            if (env->ExceptionCheck()) break;
++            const long long id = env->CallLongMethod(cursor, get_long, 0);
++            jstring name = static_cast<jstring>(env->CallObjectMethod(cursor, get_str, 1));
++            if (name) {
++                const char* n = env->GetStringUTFChars(name, nullptr);
++                if (n) rows.emplace_back(n, id);
++                if (n) env->ReleaseStringUTFChars(name, n);
++                env->DeleteLocalRef(name);
++            }
++        }
++        env->CallVoidMethod(cursor, close);
++        if (JniFailed(env, &why, "reading the log list")) break;
++
++        // Session key = "dsr_YYYYMMDD_HHMMSS" (19 chars); keep the newest one, delete the rest.
++        std::vector<std::string> keys;
++        for (const auto& r : rows)
++            if (r.first.size() >= 19) keys.push_back(r.first.substr(0, 19));
++        std::sort(keys.begin(), keys.end());
++        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
++        if (keys.size() < 2) break;
++        const std::string newest = keys.back();
++        jclass ids_cls = env->FindClass("android/content/ContentUris");
++        jmethodID with_id = env->GetStaticMethodID(ids_cls, "withAppendedId", "(Landroid/net/Uri;J)Landroid/net/Uri;");
++        if (JniFailed(env, &why, "ContentUris")) break;
++        int removed = 0;
++        for (const auto& r : rows) {
++            if (r.first.size() < 19 || r.first.compare(0, 19, newest) == 0) continue;
++            jobject item = env->CallStaticObjectMethod(ids_cls, with_id, collection, jlong(r.second));
++            if (JniFailed(env, &why, "withAppendedId") || !item) continue;
++            const jint n = env->CallIntMethod(resolver, del, item, (jstring) nullptr, (jobjectArray) nullptr);
++            if (!JniFailed(env, &why, "ContentResolver.delete") && n > 0) removed++;
++            env->DeleteLocalRef(item);
++        }
++        LOGI(kTag, "old logs: %d files deleted (the newest session is kept, plus this one)", removed);
++    } while (false);
++    if (attached_here) vm->DetachCurrentThread();
++}
++
+ void SetupLogFile(android_app* app) {
+     g_app_for_files = app;
++    PruneOldLogs(app);
+     dsr::platform::SetCreateUserFile(&CreateUserFileImpl);
+     dsr::platform::SetRequestText(&RequestTextImpl);
+     time_t now = time(nullptr);
+@@ -389,7 +479,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
+         if (FILE* w = fopen(path.c_str(), "w")) {
+             fprintf(w,
+                     "# DSR Native settings (read at start-up)\n"
+-                    "# fps: frame rate cap, 20 to 60 (30 as on Switch); e.g. 45 for a steady rate in heavy areas; auto = the\n"
++                    "# fps: frame rate cap, 15 to 60 (30 as on Switch); e.g. 45 for a steady rate in heavy areas; auto = the\n"
+                     "# cap follows what the device sustains (60, 30 or 20 fps; min_fps = 15 also allows 15)\n"
+                     "fps = %d\n"
+                     "# async_pipelines: 1 = compile new GPU pipelines in the background (no hitch; a new object may\n"
+@@ -448,7 +538,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
+             const int v = atoi(value);
+             if (!strcmp(key, "fps")) {  // e.g. 45: a steady cap below 60; auto: dynamic (60 / 30 / 20)
+                 cfg->dynamic_fps = !strcmp(value, "auto");
+-                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 20, 60);
++                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 15, 60);
+             } else if (!strcmp(key, "min_fps")) cfg->min_fps = std::clamp(v, 15, 30);
+             else if (!strcmp(key, "async_pipelines")) cfg->async_pipelines = v != 0;
+             else if (!strcmp(key, "auto_capture")) cfg->auto_capture = v != 0;
+@@ -982,7 +1072,7 @@ jboolean JNICALL MenuApply(JNIEnv* env, jclass, jstring jkey, jstring jvalue) {
+     if (key == "fps") {
+         if (dsr::FrameRateAdjustable()) {
+             c.dynamic_fps = value == "auto";
+-            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 20, 60);
++            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 15, 60);
+             now = true;
+         }
+     } else if (key == "face_buttons") {
+diff --git a/src/runtime/hooks.cpp b/src/runtime/hooks.cpp
+index e8326b9..b98442e 100644
+--- a/src/runtime/hooks.cpp
++++ b/src/runtime/hooks.cpp
+@@ -249,7 +249,8 @@ void FrameLimiter(uint8_t* self, int /*fps*/) {
+     last = now;
+     // Up to 1/20 s per step (1/min_fps with fps = auto and min_fps 15): slower devices keep the game at normal speed
+     // instead of slow motion.
+-    const double slowest = rt.config.dynamic_fps ? std::min(MinFps(), 20) : 20;
++    // A fixed cap below 20 (15 fps) needs a longer step too, or the game would run in slow motion.
++    const double slowest = rt.config.dynamic_fps ? std::min(MinFps(), 20) : std::min(20, std::clamp(rt.config.target_fps, 15, 60));
+     if (g_game_step) *g_game_step = float(std::clamp(seconds, 1.0 / 60.0, 1.0 / slowest));
+     *reinterpret_cast<int64_t*>(self + b.last_tick) = hle::os::NowTicks();
+     self[b.skip_active] = 0;
+@@ -388,7 +389,7 @@ int GpuHasBc() { return g_gpu_has_bc.load(); }
+ int FrameRateNow() {
+     if (MoviePlaying()) return MovieFps();
+     const RuntimeConfig& c = GetRuntime().config;
+-    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 20, 60);
++    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 15, 60);
+ }
+ 
+ const char* GameVersion() { return g_build ? g_build->version : nullptr; }
+@@ -453,7 +454,7 @@ void InstallGameHooks() {
+                      "game time step follows the frame time", MinFps());
+             else
+                 LOGI("hooks", "frame rate: own frame limiter at %d fps (changeable in game), game time step follows the frame time",
+-                     std::clamp(rt.config.target_fps, 20, 60));
++                     std::clamp(rt.config.target_fps, 15, 60));
+         } else {
+             LOGW("hooks", "60 fps patches failed (%s): staying at 30 fps", err.c_str());
+             rt.main.PatchInstruction(b.step_adrp + 4, 0xBD400108, b.step_ldr_insn, &err);  // undo what applied

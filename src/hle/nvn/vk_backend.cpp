@@ -3505,7 +3505,7 @@ private:
     // colour texture it samples), scaled to the target's size with a linear filter. If the pass has no such input
     // (it reads only depth, say) nothing is copied and the target stays as it was (the old behaviour).
     uint64_t dof_copies_ = 0, dof_copy_fails_ = 0;
-    void DofPassThrough(uint32_t texture_mask, Image* dst) {
+    void DofPassThrough(uint32_t texture_mask, Image* dst, bool same_size) {
         if (!dst || IsDepthFormat(dst->nvn_format)) return;
         Image* src = nullptr;
         uint32_t src_slot = 0;
@@ -3515,6 +3515,7 @@ private:
             if (!bt.valid) bt = HandleFromUniforms(1, slot);
             Image* img = bt.valid ? GetImage(bt.texture, true) : nullptr;
             if (!img || img == dst || IsDepthFormat(img->nvn_format) || img->layers > 1) continue;
+            if (same_size && (img->width != dst->width || img->height != dst->height)) continue;  // the sharp scene
             src = img;
             src_slot = slot;
         }
@@ -4370,13 +4371,18 @@ private:
             if (pcfg.no_dof)
                 drop = dof_hit = h == 0x7a6ad6744d3bc95bull || h == 0x22a6f6c6c234efe8ull ||
                                  h == 0xcdeb232ada05c0afull || h == 0xf503d9c09783ac14ull;
+            // The pass that blends the blurred copy over the sharp scene (18 instructions: the blurred 320x180 image
+            // and the 640x360 scene): with the blur gone it must pass the sharp scene through, or the water and the
+            // whole picture after a hit (where the blend weight rises) come out as the low-resolution copy.
+            const bool dof_composite = pcfg.no_dof && !pcfg.no_dof_legacy && h == 0x19ddf6396f2540b7ull;
+            if (dof_composite) drop = dof_hit = true;
             if (pcfg.no_bloom && !drop)
                 drop = h == 0xc3d56b6401ccb572ull || h == 0x512397bbc420f850ull || h == 0x9b44066e84ff04c6ull ||
                        h == 0x82aa25701a19c22bull;
             if (drop) {
                 // A dropped blur pass must not leave its target cleared: the final pass blends that target in wherever
                 // the game blurs (distance: sky, water) and the picture goes black. Copy the pass's own input instead.
-                if (dof_hit && !pcfg.no_dof_legacy) DofPassThrough(fs->info.texture_mask, colors[0]);
+                if (dof_hit && !pcfg.no_dof_legacy) DofPassThrough(fs->info.texture_mask, colors[0], dof_composite);
                 if (postfx_dropped_++ == 0)
                     LOGI(kTag, "no_dof / no_bloom: effect passes skipped (first one into %dx%d)", w, colors[0]->height);
                 return;

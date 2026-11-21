@@ -249,7 +249,8 @@ void FrameLimiter(uint8_t* self, int /*fps*/) {
     last = now;
     // Up to 1/20 s per step (1/min_fps with fps = auto and min_fps 15): slower devices keep the game at normal speed
     // instead of slow motion.
-    const double slowest = rt.config.dynamic_fps ? std::min(MinFps(), 20) : 20;
+    // A fixed cap below 20 (15 fps) needs a longer step too, or the game would run in slow motion.
+    const double slowest = rt.config.dynamic_fps ? std::min(MinFps(), 20) : std::min(20, std::clamp(rt.config.target_fps, 15, 60));
     if (g_game_step) *g_game_step = float(std::clamp(seconds, 1.0 / 60.0, 1.0 / slowest));
     *reinterpret_cast<int64_t*>(self + b.last_tick) = hle::os::NowTicks();
     self[b.skip_active] = 0;
@@ -388,7 +389,7 @@ int GpuHasBc() { return g_gpu_has_bc.load(); }
 int FrameRateNow() {
     if (MoviePlaying()) return MovieFps();
     const RuntimeConfig& c = GetRuntime().config;
-    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 20, 60);
+    return c.dynamic_fps ? g_cap_fps.load(std::memory_order_relaxed) : std::clamp(c.target_fps, 15, 60);
 }
 
 const char* GameVersion() { return g_build ? g_build->version : nullptr; }
@@ -453,7 +454,7 @@ void InstallGameHooks() {
                      "game time step follows the frame time", MinFps());
             else
                 LOGI("hooks", "frame rate: own frame limiter at %d fps (changeable in game), game time step follows the frame time",
-                     std::clamp(rt.config.target_fps, 20, 60));
+                     std::clamp(rt.config.target_fps, 15, 60));
         } else {
             LOGW("hooks", "60 fps patches failed (%s): staying at 30 fps", err.c_str());
             rt.main.PatchInstruction(b.step_adrp + 4, 0xBD400108, b.step_ldr_insn, &err);  // undo what applied

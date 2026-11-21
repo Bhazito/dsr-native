@@ -241,8 +241,98 @@ int CreateUserFileImpl(const char* name, const char* mime_type) {
     return fd;
 }
 
+
+// Keeps the logs folder to two sessions: before a new session's log is created, every session older than the newest
+// one is deleted (a session = dsr_<date>_<time>.txt and its _logcat.txt), so after this run there are two. Only the
+// files this app created can be deleted; any failure is ignored.
+void PruneOldLogs(android_app* app) {
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    bool attached_here = false;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK || !env) {
+        if (vm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) return;
+        attached_here = true;
+    }
+    std::string why;
+    do {
+        jclass dl_cls = env->FindClass("android/provider/MediaStore$Downloads");
+        if (JniFailed(env, &why, "FindClass MediaStore.Downloads") || !dl_cls) break;
+        jfieldID uri_field = env->GetStaticFieldID(dl_cls, "EXTERNAL_CONTENT_URI", "Landroid/net/Uri;");
+        if (JniFailed(env, &why, "EXTERNAL_CONTENT_URI")) break;
+        jobject collection = env->GetStaticObjectField(dl_cls, uri_field);
+        jclass act_cls = env->GetObjectClass(app->activity->clazz);
+        jmethodID get_cr = env->GetMethodID(act_cls, "getContentResolver", "()Landroid/content/ContentResolver;");
+        jobject resolver = env->CallObjectMethod(app->activity->clazz, get_cr);
+        if (JniFailed(env, &why, "getContentResolver") || !resolver) break;
+        jclass cr_cls = env->GetObjectClass(resolver);
+        jmethodID query = env->GetMethodID(cr_cls, "query",
+            "(Landroid/net/Uri;[Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Landroid/database/Cursor;");
+        jmethodID del = env->GetMethodID(cr_cls, "delete", "(Landroid/net/Uri;Ljava/lang/String;[Ljava/lang/String;)I");
+        if (JniFailed(env, &why, "ContentResolver methods")) break;
+
+        jclass str_cls = env->FindClass("java/lang/String");
+        jobjectArray proj = env->NewObjectArray(2, str_cls, nullptr);
+        jstring c0 = env->NewStringUTF("_id"), c1 = env->NewStringUTF("_display_name");
+        env->SetObjectArrayElement(proj, 0, c0);
+        env->SetObjectArrayElement(proj, 1, c1);
+        jstring sel = env->NewStringUTF("relative_path LIKE ? AND _display_name LIKE ? AND _display_name LIKE ?");
+        jobjectArray args = env->NewObjectArray(3, str_cls, nullptr);
+        const char* a[3] = {"Download/DSRNative/logs%", "dsr_2%", "%.txt"};
+        for (int i = 0; i < 3; i++) {
+            jstring v = env->NewStringUTF(a[i]);
+            env->SetObjectArrayElement(args, i, v);
+            env->DeleteLocalRef(v);
+        }
+        jobject cursor = env->CallObjectMethod(resolver, query, collection, proj, sel, args, (jstring) nullptr);
+        if (JniFailed(env, &why, "ContentResolver.query") || !cursor) break;
+        jclass cur_cls = env->GetObjectClass(cursor);
+        jmethodID move_next = env->GetMethodID(cur_cls, "moveToNext", "()Z");
+        jmethodID get_long = env->GetMethodID(cur_cls, "getLong", "(I)J");
+        jmethodID get_str = env->GetMethodID(cur_cls, "getString", "(I)Ljava/lang/String;");
+        jmethodID close = env->GetMethodID(cur_cls, "close", "()V");
+        std::vector<std::pair<std::string, long long>> rows;  // (name, _id)
+        while (env->CallBooleanMethod(cursor, move_next)) {
+            if (env->ExceptionCheck()) break;
+            const long long id = env->CallLongMethod(cursor, get_long, 0);
+            jstring name = static_cast<jstring>(env->CallObjectMethod(cursor, get_str, 1));
+            if (name) {
+                const char* n = env->GetStringUTFChars(name, nullptr);
+                if (n) rows.emplace_back(n, id);
+                if (n) env->ReleaseStringUTFChars(name, n);
+                env->DeleteLocalRef(name);
+            }
+        }
+        env->CallVoidMethod(cursor, close);
+        if (JniFailed(env, &why, "reading the log list")) break;
+
+        // Session key = "dsr_YYYYMMDD_HHMMSS" (19 chars); keep the newest one, delete the rest.
+        std::vector<std::string> keys;
+        for (const auto& r : rows)
+            if (r.first.size() >= 19) keys.push_back(r.first.substr(0, 19));
+        std::sort(keys.begin(), keys.end());
+        keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+        if (keys.size() < 2) break;
+        const std::string newest = keys.back();
+        jclass ids_cls = env->FindClass("android/content/ContentUris");
+        jmethodID with_id = env->GetStaticMethodID(ids_cls, "withAppendedId", "(Landroid/net/Uri;J)Landroid/net/Uri;");
+        if (JniFailed(env, &why, "ContentUris")) break;
+        int removed = 0;
+        for (const auto& r : rows) {
+            if (r.first.size() < 19 || r.first.compare(0, 19, newest) == 0) continue;
+            jobject item = env->CallStaticObjectMethod(ids_cls, with_id, collection, jlong(r.second));
+            if (JniFailed(env, &why, "withAppendedId") || !item) continue;
+            const jint n = env->CallIntMethod(resolver, del, item, (jstring) nullptr, (jobjectArray) nullptr);
+            if (!JniFailed(env, &why, "ContentResolver.delete") && n > 0) removed++;
+            env->DeleteLocalRef(item);
+        }
+        LOGI(kTag, "old logs: %d files deleted (the newest session is kept, plus this one)", removed);
+    } while (false);
+    if (attached_here) vm->DetachCurrentThread();
+}
+
 void SetupLogFile(android_app* app) {
     g_app_for_files = app;
+    PruneOldLogs(app);
     dsr::platform::SetCreateUserFile(&CreateUserFileImpl);
     dsr::platform::SetRequestText(&RequestTextImpl);
     time_t now = time(nullptr);
@@ -389,7 +479,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
         if (FILE* w = fopen(path.c_str(), "w")) {
             fprintf(w,
                     "# DSR Native settings (read at start-up)\n"
-                    "# fps: frame rate cap, 20 to 60 (30 as on Switch); e.g. 45 for a steady rate in heavy areas; auto = the\n"
+                    "# fps: frame rate cap, 15 to 60 (30 as on Switch); e.g. 45 for a steady rate in heavy areas; auto = the\n"
                     "# cap follows what the device sustains (60, 30 or 20 fps; min_fps = 15 also allows 15)\n"
                     "fps = %d\n"
                     "# async_pipelines: 1 = compile new GPU pipelines in the background (no hitch; a new object may\n"
@@ -448,7 +538,7 @@ void LoadSettings(const std::string& path, dsr::RuntimeConfig* cfg) {
             const int v = atoi(value);
             if (!strcmp(key, "fps")) {  // e.g. 45: a steady cap below 60; auto: dynamic (60 / 30 / 20)
                 cfg->dynamic_fps = !strcmp(value, "auto");
-                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 20, 60);
+                cfg->target_fps = cfg->dynamic_fps ? 60 : std::clamp(v, 15, 60);
             } else if (!strcmp(key, "min_fps")) cfg->min_fps = std::clamp(v, 15, 30);
             else if (!strcmp(key, "async_pipelines")) cfg->async_pipelines = v != 0;
             else if (!strcmp(key, "auto_capture")) cfg->auto_capture = v != 0;
@@ -982,7 +1072,7 @@ jboolean JNICALL MenuApply(JNIEnv* env, jclass, jstring jkey, jstring jvalue) {
     if (key == "fps") {
         if (dsr::FrameRateAdjustable()) {
             c.dynamic_fps = value == "auto";
-            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 20, 60);
+            c.target_fps = c.dynamic_fps ? 60 : std::clamp(atoi(value.c_str()), 15, 60);
             now = true;
         }
     } else if (key == "face_buttons") {

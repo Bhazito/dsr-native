@@ -512,8 +512,9 @@ void QueuePresentTexture(void* queue, void* window, int index) {
     }
     if (next > now)
         std::this_thread::sleep_until(next);
-    else if (now - next > frame * 4)
-        next = now;  // fell behind (loading): resync instead of bursting
+    else if (now - next > frame / 8)
+        next = now - frame / 8;  // fell behind: forget the debt. Paying it back (frames presented early, back to back
+                                 // until the schedule caught up) showed as 25-30 fps for a second after every slow stretch
     next += frame;
 
     TexRef tex = WindowTexture(window, index);

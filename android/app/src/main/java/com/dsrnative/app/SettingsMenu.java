@@ -431,8 +431,8 @@ public final class SettingsMenu {
     private void buildGraphicsTab() {
         section(Strings.t("sec_display"));
         choice("fps", Strings.t("fps_t"), Strings.t("fps_auto_n") + " " + Strings.t("changes_now"),
-                new String[] {"20", "30", "45", "60", "auto"},
-                new String[] {"20 fps", "30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
+                new String[] {"15", "20", "30", "45", "60", "auto"},
+                new String[] {"15 fps", "20 fps", "30 fps", "45 fps", "60 fps", Strings.t("fps_auto")}, "60");
         choice("present_mode", Strings.t("present_t"), Strings.t("changes_next"),
                 new String[] {"fifo", "mailbox"},
                 new String[] {Strings.t("present_vsync") + " " + Strings.t("default_mark"), Strings.t("present_mailbox")},
